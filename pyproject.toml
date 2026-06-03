@@ -1,0 +1,72 @@
+[project]
+name = "perplexity-agent"
+version = "0.1.0"
+description = "Agentic web search, reasoning, and fact-checking system"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Web framework
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    # Async HTTP
+    "httpx>=0.27.0",
+    "aiohttp>=3.9.0",
+    # LangChain / LangGraph
+    "langchain>=0.2.0",
+    "langchain-google-genai>=1.0.5",
+    "langchain-community>=0.2.0",
+    "langgraph>=0.1.0",
+    # Scraping
+    "playwright>=1.44.0",
+    "beautifulsoup4>=4.12.0",
+    "readability-lxml>=0.8.1",
+    "lxml>=5.2.0",
+    # Config / validation
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "python-dotenv>=1.0.0",
+    # Observability
+    "structlog>=24.2.0",
+    "opentelemetry-api>=1.24.0",
+    "opentelemetry-sdk>=1.24.0",
+    "langsmith>=0.1.75",
+    # Utils
+    "tenacity>=8.3.0",
+    "anyio>=4.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-httpx>=0.30.0",
+    "pytest-mock>=3.14.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "config", "core", "agents", "providers",
+    "tools", "models", "api",
+]
