@@ -10,7 +10,6 @@ Async web scraper that:
 from __future__ import annotations
 
 import asyncio
-import sys
 from datetime import datetime, timezone
 
 import httpx
@@ -19,37 +18,44 @@ from bs4 import BeautifulSoup
 from config.settings import settings
 
 
-async def _fetch_with_playwright(url: str, timeout_s: float) -> str:
-    """Use Playwright async API to render and return page HTML."""
-    from playwright.async_api import async_playwright  # lazy import
+def _run_playwright_in_thread(url: str) -> str:
+    import sys
+    if sys.platform == 'win32':
+        # On Windows, SelectorEventLoop does not support subprocesses (which Playwright uses to launch the browser).
+        # We create a ProactorEventLoop specifically for Playwright inside this background thread.
+        loop = asyncio.ProactorEventLoop()
+    else:
+        loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
-        page = await browser.new_page()
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=int(timeout_s * 1000))
-            html = await page.content()
-        finally:
-            await browser.close()
-    return html
-
-
-def _run_playwright_in_thread(url: str, timeout_s: float) -> str:
-    """Helper run in a separate thread to ensure Proactor loop is used on Windows."""
-    if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
-    loop = asyncio.new_event_loop()
+    async def _fetch():
+        from playwright.async_api import async_playwright  # lazy import
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            page = await browser.new_page()
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=settings.scrape_timeout_s * 1000)
+                return await page.content()
+            finally:
+                await browser.close()
     try:
-        return loop.run_until_complete(_fetch_with_playwright(url, timeout_s))
+        return loop.run_until_complete(_fetch())
     finally:
         loop.close()
+
+
+async def _fetch_with_playwright(url: str) -> str:
+    """Use Playwright async API to render and return page HTML in a separate thread (for Windows event loop compatibility)."""
+    return await asyncio.to_thread(_run_playwright_in_thread, url)
+
 
 
 async def _fetch_with_httpx(url: str) -> str:
     """Lightweight fallback fetcher."""
     headers = {
-        "User-Agent": ("Mozilla/5.0 (compatible; PerplexityAgent/0.1; +https://github.com/example)")
+        "User-Agent": (
+            "Mozilla/5.0 (compatible; PerplexityAgent/0.1; +https://github.com/example)"
+        )
     }
     async with httpx.AsyncClient(
         timeout=settings.scrape_timeout_s,
@@ -84,18 +90,33 @@ def _extract_text(html: str, max_chars: int) -> str:
 async def scrape_url(url: str) -> tuple[str, datetime]:
     """
     Scrape a single URL and return (text, scraped_at).
-    Tries Playwright first (in a separate thread to support SelectorEventLoop on Windows),
-    falls back to httpx.
+    Tries httpx first (fast/lightweight), falls back to Playwright for JS-heavy sites.
     """
+    text = ""
     try:
-        html = await asyncio.to_thread(_run_playwright_in_thread, url, settings.scrape_timeout_s)
-    except Exception:
+        # 1. Try lightweight HTTPX first with a short timeout
         html = await asyncio.wait_for(
             _fetch_with_httpx(url),
+            timeout=min(settings.scrape_timeout_s, 5),
+        )
+        text = _extract_text(html, settings.max_scraped_chars)
+        # If we got substantial text and it doesn't indicate JS requirement, return it
+        if len(text) > 300 and not any(kw in text.lower() for kw in ["enable javascript", "javascript is required", "javascript enabled"]):
+            return text, datetime.now(timezone.utc)
+    except Exception:
+        pass
+
+    try:
+        # 2. Fall back to Playwright if HTTPX failed or page requires JS rendering
+        html = await asyncio.wait_for(
+            _fetch_with_playwright(url),
             timeout=settings.scrape_timeout_s,
         )
+        text = _extract_text(html, settings.max_scraped_chars)
+    except Exception:
+        # If Playwright fails too, we keep the HTTPX result if we had one
+        pass
 
-    text = _extract_text(html, settings.max_scraped_chars)
     return text, datetime.now(timezone.utc)
 
 
