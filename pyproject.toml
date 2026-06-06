@@ -1,7 +1,7 @@
 [project]
-name = "perplexity-agent"
-version = "0.1.0"
-description = "Agentic web search, reasoning, and fact-checking system"
+name = "perceptyxai-v2"
+version = "2.0.0"
+description = "Perplexity-class AI search engine — v2 production architecture"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -25,17 +25,46 @@ dependencies = [
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
     "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.9",
+    # PostgreSQL
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    # Redis + ARQ workers
+    "redis[hiredis]>=5.0.0",
+    "arq>=0.26.0",
     # Observability
     "structlog>=24.2.0",
     "opentelemetry-api>=1.24.0",
     "opentelemetry-sdk>=1.24.0",
+    "prometheus-client>=0.20.0",
     "langsmith>=0.1.75",
+    # Multimodal
+    "faster-whisper>=1.0.0",
+    "google-genai",
+    # News
+    "newsapi-python>=0.2.7",
+    # RAG / vector store
+    "chromadb>=0.5.0",
+    "langchain-chroma>=0.1.2",
+    "langchain-huggingface>=0.0.3",
+    "sentence-transformers>=3.0.0",
+    "pypdf>=4.2.0",
+    "unstructured>=0.14.0",
+    # Hybrid search
+    "rank-bm25>=0.2.2",
+    # SSE streaming
+    "sse-starlette>=2.1.0",
+    # DuckDuckGo fallback
+    "duckduckgo-search>=6.1.0",
     # Utils
     "tenacity>=8.3.0",
     "anyio>=4.4.0",
+    "numpy>=1.26.0",
 ]
 
 [project.optional-dependencies]
+prod = []
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",
@@ -68,5 +97,6 @@ testpaths = ["tests"]
 [tool.hatch.build.targets.wheel]
 packages = [
     "config", "core", "agents", "providers",
-    "tools", "models", "api",
+    "tools", "models", "api", "rag", "memory",
+    "evaluation", "db", "workers",
 ]

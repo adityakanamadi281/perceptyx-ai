@@ -1,102 +1,126 @@
-# Perplexity Agent
+# PerceptyxAI
 
-Agentic web search, reasoning, and fact-checking system powered by **LangGraph**, **LangChain**, and **Gemini**.
+A production-grade, Perplexity-class AI search engine built for high-performance and deep multi-source research.
 
 ---
 
 ## 🚀 Features
 
-* **🗺️ Multi-Agent Planning**: Decomposes complex user queries into optimal parallel search sub-queries.
-* **🔍 Parallel Web Search & Scraping**: Performs lightning-fast concurrent searches via Serper API and scrapes full page contents using headless **Playwright** browsers.
-* **🧠 Chain-of-Thought Reasoning**: Evaluates and cross-checks information across multiple sources to resolve contradictions and extract key facts.
-* **📝 Source Synthesis & Citation**: Generates a unified response with structured, traceable, numbered citations.
-* **📊 Deep Observability**: Logs structured telemetry (latency, token usage) for every agent step, with optional integration for **LangSmith** and **OpenTelemetry**.
+- **Intelligent Query Complexity Routing**: Dynamically classifies user queries (SIMPLE, MEDIUM, COMPLEX, or RESEARCH) to optimize pathing, latency, and resource utilization.
+- **Parallel Multi-Source Retrieval**: Searches simultaneously across Google (Serper), DuckDuckGo (fallback), local vector stores, news sources, and GitHub.
+- **Advanced Hybrid RAG**: Uses a hybrid search engine (Dense Vector Embeddings + BM25 Lexical Search) with Reciprocal Rank Fusion (RRF) and BGE Cross-Encoder Reranking (mapping top-50 candidates to top-10).
+- **Multi-Level Caching**: Decreases latency using a multi-tiered cache layout (L1 in-memory, L2 Redis with distributed locks/pubsub, L3 PostgreSQL persistence).
+- **Agentic Multi-Step Reasoning**: Leverages dedicated planning and reasoning agents for complex multi-hop queries, with automated fallback from Gemini to Cloudflare Workers AI.
+- **Asynchronous Deep Research**: Handles long-running research tasks in the background via ARQ queues and workers (scraping, crawling, embedding, and execution).
+- **Multimodal Capabilities**: Integrates speech-to-text via Faster-Whisper and processes queries containing rich media inputs.
+- **Built-in Quality Evaluation**: Evaluates research answers dynamically using an automated LLM-in-the-loop evaluator.
+- **Production Observability**: Full metric integration with Prometheus, Grafana, OpenTelemetry, LangSmith, and structured logs.
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠️ Tech Stack 
 
-* **Core Frameworks**: [FastAPI](https://fastapi.tiangolo.com/) & [Uvicorn](https://www.uvicorn.org/) (Async API layer), [LangGraph](https://www.langchain.com/langgraph) & [LangChain](https://www.langchain.com/) (Agentic orchestration & chains)
-* **LLM Engine**: Google [Gemini API](https://ai.google.dev/) (`gemini-1.5-flash` by default)
-* **Web Scraping**: [Playwright](https://playwright.dev/python/) (Chromium backend), [BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/), [Readability-lxml](https://github.com/buriy/python-readability)
-* **Environment & Package Management**: [uv](https://github.com/astral-sh/uv) (Extremely fast Rust-based dependency resolver and workspace manager)
-* **Quality Assurance**: [pytest](https://docs.pytest.org/), [ruff](https://github.com/astral-sh/ruff) (formatting & linting), [mypy](https://mypy-lang.org/) (type checking)
-* **Observability**: [structlog](https://www.structlog.org/), [OpenTelemetry SDK](https://opentelemetry.io/), [LangSmith](https://smith.langchain.com/)
+- **Framework**: FastAPI & Uvicorn (High-performance ASGI server)
+- **Agent Framework**: LangChain 
+- **Databases & Cache**: PostgreSQL (via SQLAlchemy & asyncpg), ChromaDB (Vector DB), and Redis (L2 caching & lock management)
+- **LLM Providers**: Google Gemini (primary) and Cloudflare Workers AI (fallback/Llama models)
+- **Information Retrieval**: Sentence-Transformers (Embeddings), BGE Cross-Encoder (Reranking), and Rank-BM25 (Lexical search)
+- **Background Workers**: ARQ (Redis-based job queue)
+- **Scraping & Crawling**: Playwright, BeautifulSoup4, and Readability
+- **Observability**: Prometheus, Grafana, OpenTelemetry, and structlog
+- **Package Manager / Build**: Python >= 3.11, Hatchling
 
 ---
 
-## ⏱️ Setup and Run
+## 📦 Project Structure
 
-### 1. Install `uv`
-If you haven't installed Astral's `uv` yet:
-```bash
-# macOS / Linux
-curl -Lsf https://astral.sh/uv/install.sh | sh
-
-# Windows (PowerShell)
-irm https://astral.sh/uv/install.ps1 | iex
+```text
+├── agents/             # Core agent logic (answering, RAG, reasoning, router, search)
+├── api/                # FastAPI application routes (main entrypoint, query handling, SSE)
+├── config/             # Environment variables and configuration settings
+├── core/               # Orchestration engine (complexity routing, caching, planning, context)
+├── db/                 # DB schemas, models, and connection engine (PostgreSQL)
+├── evaluation/         # Auto-evaluators to score generated answers
+├── memory/             # Persistent chat/session memory store
+├── migrations/         # Alembic database migration scripts
+├── models/             # Pydantic request/response schemas
+├── monitoring/         # Configuration files for Prometheus and Grafana dashboards
+├── providers/          # Integrations for LLMs (Gemini, Cloudflare Workers AI fallback)
+├── rag/                # Hybrid search, reranker, and vector store ingestion scripts
+├── scripts/            # Shell and Python utility scripts
+├── static/             # Static files and assets
+├── tools/              # Agent tools (Playwright scraping, DuckDuckGo, GitHub, News, Serper, Whispers)
+└── workers/            # Async ARQ task queue workers (crawl, embed, research, search)
 ```
 
-### 2. Clone and Synchronize Workspace
-Clone the repository and automatically prepare your virtual environment and dependencies using `uv sync`:
-```bash
-git clone https://github.com/adityakanamadi281/perplexity-agent.git
-cd perplexity_agent
-uv sync --extra dev
-uv run playwright install chromium
-```
+---
 
-### 3. Configure Environment Variables
-Copy the example environment file and configure your API keys:
+## ⚙️ Setup and Run
+
+### 1. Prerequisites
+Ensure you have the following installed on your system:
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) (Fast Python package manager)
+- Docker & Docker Compose
+- API Keys: Google Gemini, Serper API
+
+### 2. Environment Configuration
+Copy the sample environment file and fill in your keys:
 ```bash
 cp .env.example .env
 ```
-Open `.env` and set:
-* `GEMINI_API_KEY`: Get one from [Google AI Studio](https://aistudio.google.com/app/apikey).
-* `SERPER_API_KEY`: Get one from [Serper.dev](https://serper.dev) for web search results.
+Update the values in `.env` for your database configuration, `GEMINI_API_KEY`, `SERPER_API_KEY`, and optional Cloudflare Workers credentials.
 
-### 4. Run the Development Server
-Launch the FastAPI application:
+### 3. Installation
+Initialize the virtual environment and install all dependencies using `uv`:
 ```bash
-uv run uvicorn api.main:app --reload --port 8000
+uv sync
 ```
-Open [http://localhost:8000/](http://localhost:8000/) in your browser to interact with the search web client interface.
+*Note: This automatically creates a `.venv` virtual environment and installs the project and its dependencies based on `pyproject.toml` and `uv.lock`.*
 
-### 5. Run Verification Tasks
-Ensure everything compiles, formats, and passes tests:
+### 4. Run Services
+You can run commands directly using `uv run` (which executes them within the virtual environment context), or manually activate the virtual environment beforehand:
+
+**To activate manually:**
 ```bash
-# Run pytest test suite
-uv run pytest -v
+# On Windows (PowerShell)
+.venv\Scripts\Activate.ps1
 
-# Format code with ruff
-uv run ruff format
+# On Linux/macOS
+source .venv/bin/activate
 ```
 
----
+#### Step A: Start Infrastructure (PostgreSQL & Redis)
 
-## 📂 Project Structure
+**Using Docker (Recommended):**
+```bash
+docker-compose up -d
+```
 
+**Natively (Without Docker):**
+Ensure that both PostgreSQL and Redis services are running on your local machine:
+* **PostgreSQL**: Standard service active on port `5432` (ensure the credentials in [.env](file:///c:/Users/adity/DS_Projects/interview-project/perplexity_agent/.env#L19) match your local setup).
+* **Redis**: Standard service active on port `6379`.
+  * *On Windows (WSL)*: `sudo service redis-server start`
+  * *On Windows (Native)*: Run `.\redis-server.exe` in your Redis directory.
+
+#### Step B: Apply Database Migrations
+```bash
+uv run alembic upgrade head
 ```
-perplexity_agent/
-├── config/settings.py        # Pydantic-Settings, env vars
-├── core/
-│   ├── planner.py            # Query → sub-queries via Gemini
-│   ├── orchestrator.py       # LangGraph state machine
-│   └── observability.py      # structlog, TelemetryCallback, OTEL
-├── agents/
-│   ├── search.py             # Serper search + Playwright scraper
-│   ├── reason.py             # Gemini chain-of-thought reasoning
-│   └── answer.py             # Synthesis + citation
-├── providers/gemini.py       # Cached ChatGoogleGenerativeAI
-├── tools/
-│   ├── serper.py             # Serper API wrapper
-│   └── scraper.py            # Playwright / httpx / readability
-├── models/schemas.py         # All Pydantic v2 models
-├── api/
-│   ├── main.py               # FastAPI app factory
-│   └── query.py              # POST /query router
-├── tests/test_pipeline.py    # Integration tests
-├── .env.example
-├── pyproject.toml
-└── README.md
+
+#### Step C: Start the FastAPI API Server
+```bash
+uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
+
+#### Step D: Run Async Workers
+In a separate terminal, start the background queue:
+```bash
+uv run python -m arq workers.settings.WorkerSettings
+```
+
+### 5. Accessing the Applications
+- **API Swagger Documentation**: http://localhost:8000/docs
+- **Grafana Dashboards**: http://localhost:3000 (Default credentials: admin / admin)
+- **Prometheus UI**: http://localhost:9090
