@@ -1,51 +1,79 @@
 """
-api/main.py
------------
-FastAPI application factory with:
-  - CORS middleware
-  - Structured logging on startup
-  - OpenTelemetry bootstrap
-  - Health-check endpoint
-  - Pipeline router
+api/main.py - v2
+────────────────
+FastAPI app factory with:
+  - Lifespan startup (DB init, Redis ping, OTel)
+  - /api/v1 routes
+  - /health with dependency checks
+  - Prometheus /metrics (optional)
+  - Static SPA
 """
-
 from __future__ import annotations
 
-import os
 import sys
 import asyncio
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from api.query import router as query_router
 from config.settings import settings
-from core.observability import init_otel
+from core.observability import init_otel, get_logger
 
 log = structlog.get_logger()
+STATIC_DIR = Path(__file__).parent.parent / "static"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup / shutdown lifecycle."""
+    init_otel()
+
+    # DB initialisation
+    try:
+        from db.engine import init_db
+        await init_db()
+        log.info("db_ready")
+    except Exception as exc:
+        log.warning("db_init_failed", error=str(exc))
+
+    # Redis ping
+    try:
+        from core.cache import get_redis
+        r = get_redis()
+        await r.ping()
+        log.info("redis_ready")
+    except Exception as exc:
+        log.warning("redis_unavailable", error=str(exc))
+
+    Path("./data").mkdir(exist_ok=True)
+    log.info("app_startup", host=settings.app_host, port=settings.app_port)
+    yield
+    log.info("app_shutdown")
 
 
 def create_app() -> FastAPI:
-    # Bootstrap observability before the app starts handling requests
-    init_otel()
-
     app = FastAPI(
-        title="Perplexity Agent",
+        title="PerceptyxAI v2",
         description=(
-            "Agentic web search, reasoning, and fact-checking system. "
-            "Powered by LangGraph + Gemini."
+            "Perplexity-class AI search engine: parallel agents, hybrid retrieval, "
+            "cross-encoder reranking, Redis cache, ARQ workers, Cloudflare AI fallback."
         ),
-        version="0.1.0",
+        version="2.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
-    # ── CORS ──────────────────────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -53,39 +81,89 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # ── Routes ────────────────────────────────────────────────────────────────
+    # ── API routes ────────────────────────────────────────────────────────────
     app.include_router(query_router, prefix="/api/v1")
 
-    # ── UI Route ──────────────────────────────────────────────────────────────
-    @app.get("/", response_class=HTMLResponse, tags=["ui"])
-    async def serve_ui() -> HTMLResponse:
-        file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "index.html")
-        if not os.path.exists(file_path):
-            file_path = "static/index.html"
+    # ── Ingest endpoint ───────────────────────────────────────────────────────
+    @app.post("/api/v1/ingest", tags=["knowledge base"])
+    async def ingest_document(
+        file: __import__("fastapi").UploadFile = __import__("fastapi").File(...),
+        background: bool = False,
+    ):
+        """Upload a PDF, Markdown, or text file to the local knowledge base."""
+        from pathlib import Path as P
+        import tempfile
+        suffix = P(file.filename or "").suffix.lower()
+        if suffix not in {".pdf", ".md", ".txt"}:
+            from fastapi import HTTPException
+            raise HTTPException(400, f"Unsupported file type: {suffix}")
+        tmp = P(tempfile.mktemp(suffix=suffix))
+        tmp.write_bytes(await file.read())
+        if background:
+            # Offload to ARQ worker
+            try:
+                from arq import create_pool
+                from arq.connections import RedisSettings
+                pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+                await pool.enqueue_job("workers.embedding_worker.embed_documents", file_path=str(tmp))
+                return {"file": file.filename, "status": "queued"}
+            except Exception:
+                pass
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            return HTMLResponse(content=content)
-        except Exception as exc:
-            return HTMLResponse(
-                content=f"<h1>UI file not found</h1><p>{str(exc)}</p>", status_code=404
-            )
+            from rag.ingester import ingest_file
+            n_chunks = await ingest_file(tmp)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return {"file": file.filename, "chunks_indexed": n_chunks}
 
-    # ── Health check ──────────────────────────────────────────────────────────
+    # ── Memory endpoints ──────────────────────────────────────────────────────
+    @app.delete("/api/v1/memory/{session_id}", tags=["memory"])
+    async def clear_memory(session_id: str):
+        from memory.store import clear_session
+        await clear_session(session_id)
+        return {"session_id": session_id, "cleared": True}
+
+    # ── Health ────────────────────────────────────────────────────────────────
     @app.get("/health", tags=["infra"])
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "version": "0.1.0"}
+    async def health():
+        status = {"version": "2.0.0", "redis": "unknown", "postgres": "unknown"}
+        try:
+            from core.cache import get_redis
+            await get_redis().ping()
+            status["redis"] = "ok"
+        except Exception as exc:
+            status["redis"] = f"error: {exc}"
+        try:
+            from db.engine import engine
+            async with engine.connect() as conn:
+                await conn.execute(__import__("sqlalchemy", fromlist=["text"]).text("SELECT 1"))
+            status["postgres"] = "ok"
+        except Exception as exc:
+            status["postgres"] = f"error: {exc}"
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-    @app.on_event("startup")
-    async def on_startup() -> None:
-        log.info(
-            "app_startup",
-            host=settings.app_host,
-            port=settings.app_port,
-            gemini_model=settings.gemini_model,
-            log_level=settings.log_level,
+        all_ok = all(v == "ok" for v in [status["redis"], status["postgres"]])
+        return JSONResponse(
+            content={"status": "ok" if all_ok else "degraded", **status},
+            status_code=200,
         )
+
+    # ── Prometheus metrics passthrough ────────────────────────────────────────
+    @app.get("/metrics", tags=["infra"], include_in_schema=False)
+    async def metrics():
+        try:
+            from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+            from fastapi.responses import Response
+            return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+        except ImportError:
+            return JSONResponse({"error": "prometheus_client not installed"})
+
+    # ── Static SPA ────────────────────────────────────────────────────────────
+    if STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+        @app.get("/", include_in_schema=False)
+        async def serve_root():
+            return FileResponse(str(STATIC_DIR / "index.html"))
 
     return app
 
@@ -94,11 +172,10 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(
         "api.main:app",
         host=settings.app_host,
         port=settings.app_port,
         workers=settings.app_workers,
-        log_config=None,  # let structlog handle all logging
+        log_config=None,
     )
