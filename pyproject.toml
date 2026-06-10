@@ -1,5 +1,5 @@
 [project]
-name = "perceptyxai-v2"
+name = "perceptyx-ai" 
 version = "2.0.0"
 description = "Perplexity-class AI search engine — v2 production architecture"
 readme = "README.md"
@@ -61,6 +61,8 @@ dependencies = [
     "tenacity>=8.3.0",
     "anyio>=4.4.0",
     "numpy>=1.26.0",
+    "firecrawl-py>=4.28.2",
+    "tavily-python>=0.7.25",
 ]
 
 [project.optional-dependencies]

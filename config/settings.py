@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8",
         case_sensitive=False, extra="ignore",
+        str_strip_whitespace=True,
     )
 
     # ── Required ──────────────────────────────────────────────────────────────
@@ -22,6 +23,12 @@ class Settings(BaseSettings):
     cloudflare_model: str = Field("@cf/meta/llama-3.1-8b-instruct")
     cloudflare_gateway_id: str | None = Field(None)
     use_cloudflare_fallback: bool = Field(True)
+
+    # ── Tavily ────────────────────────────────────────────────────────────────────
+    tavily_api_key: SecretStr | None = Field(None, description="Tavily search API key")
+
+    # ── Firecrawl ─────────────────────────────────────────────────────────────────
+    firecrawl_api_key: SecretStr | None = Field(None, description="Firecrawl API key")
 
     # ── Optional API keys ─────────────────────────────────────────────────────
     newsapi_key: str | None = Field(None)
@@ -98,7 +105,9 @@ class Settings(BaseSettings):
 
     # ── Router ────────────────────────────────────────────────────────────────
     router_recency_keywords: list[str] = Field(
-        default_factory=lambda: ["today","latest","current","recent","news","now","2024","2025","2026"]
+        default_factory=lambda: [
+            "today", "latest", "current", "recent", "news", "now", "2024", "2025", "2026"
+        ]
     )
 
     # ── Query Complexity ─────────────────────────────────────────────────────
