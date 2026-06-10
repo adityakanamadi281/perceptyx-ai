@@ -1,21 +1,23 @@
 """
-agents/router.py 
-----------------------
-Router agent: classifies each sub-query into retrieval modes:
+agents/router.py
+----------------
+Router agent: classifies each sub-query into retrieval modes.
   web_only | local_only | hybrid | news | github
 
 Decision logic:
   1. Fast heuristics (keywords, corpus probe)
   2. LLM for ambiguous cases
-"""
 
+FIXED: route_all() now runs all routing in PARALLEL (removed sequential sleep).
+"""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
-import asyncio
 
+import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from config.settings import settings
@@ -24,11 +26,17 @@ from models.schemas import PipelineTrace, RouteDecision, RouteMode
 from providers.gemini import get_gemini_llm
 from rag.vectorstore import get_vectorstore
 
+log = structlog.get_logger()
+
 _GITHUB_RE = re.compile(r"[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+")
-_NEWS_KEYWORDS = {"news", "breaking", "headline", "article", "reported", "announced",
-                   "published", "press", "media", "journalist"}
-_GITHUB_KEYWORDS = {"commit", "pull request", "pr", "merge", "repo", "repository",
-                     "branch", "issue", "code", "github", "release", "tag", "diff"}
+_NEWS_KEYWORDS = {
+    "news", "breaking", "headline", "article", "reported", "announced",
+    "published", "press", "media", "journalist",
+}
+_GITHUB_KEYWORDS = {
+    "commit", "pull request", "pr", "merge", "repo", "repository",
+    "branch", "issue", "code", "github", "release", "tag", "diff",
+}
 
 _SYSTEM = """\
 You are a retrieval router. Classify the query into ONE of:
@@ -65,23 +73,19 @@ def _fast_route(query: str, recency: float, corpus: float) -> RouteMode | None:
     q_lower = query.lower()
     words = set(q_lower.split())
 
-    # GitHub: has owner/repo pattern or explicit keywords
     if _GITHUB_RE.search(query) or words & _GITHUB_KEYWORDS:
         return RouteMode.GITHUB
 
-    # News: explicit news keywords
     if words & _NEWS_KEYWORDS:
         return RouteMode.NEWS
 
-    # Strong web signal
     if recency >= 0.8 and corpus < 0.4:
         return RouteMode.WEB_ONLY
 
-    # Strong local signal
     if corpus >= 0.65 and recency < 0.3:
         return RouteMode.LOCAL_ONLY
 
-    return None  # ambiguous
+    return None
 
 
 async def route_sub_query(sub_query: str, trace: PipelineTrace) -> RouteDecision:
@@ -99,7 +103,7 @@ async def route_sub_query(sub_query: str, trace: PipelineTrace) -> RouteDecision
             reasoning="heuristic", recency_score=recency, corpus_match_score=corpus,
         )
 
-    # LLM fallback
+    # LLM fallback for ambiguous cases
     callback = TelemetryCallback("router", trace)
     llm = get_gemini_llm()
     prompt = (
@@ -127,9 +131,10 @@ async def route_sub_query(sub_query: str, trace: PipelineTrace) -> RouteDecision
         reasoning = "LLM routing failed; defaulting to hybrid"
 
     latency_ms = (time.perf_counter() - t0) * 1000
-    logger.info("route_decided", sub_query=sub_query[:60], mode=mode,
-                latency_ms=round(latency_ms, 1))
-
+    logger.info(
+        "route_decided", sub_query=sub_query[:60], mode=mode,
+        latency_ms=round(latency_ms, 1),
+    )
     return RouteDecision(
         sub_query=sub_query, mode=mode, reasoning=reasoning,
         recency_score=recency, corpus_match_score=corpus,
@@ -137,8 +142,10 @@ async def route_sub_query(sub_query: str, trace: PipelineTrace) -> RouteDecision
 
 
 async def route_all(sub_queries: list[str], trace: PipelineTrace) -> list[RouteDecision]:
-    decisions = []
-    for q in sub_queries:
-        decisions.append(await route_sub_query(q, trace))
-        await asyncio.sleep(0.5)
-    return decisions
+    """
+    Route all sub-queries in PARALLEL.
+    Previously this ran sequentially with asyncio.sleep(0.5) — now fixed.
+    """
+    return list(
+        await asyncio.gather(*[route_sub_query(q, trace) for q in sub_queries])
+    )
