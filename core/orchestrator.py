@@ -1,13 +1,18 @@
 """
-core/orchestrator.py - v2
-─────────────────────────
+core/orchestrator.py
+─────────────────────
 Supervisor Architecture with:
   - Query complexity classification
   - Fast path (SIMPLE < 3s)
   - Parallel agent execution
   - Redis answer cache
   - Conditional reasoning / evaluation
-  - Streaming progress events
+  - Real-time token streaming (SSE answer_token events)
+
+CHANGES:
+  - _node_reason: parallelised (removed asyncio.sleep(0.3))
+  - _node_answer: streams tokens via SSEEventType.ANSWER_TOKEN
+  - stream_pipeline: emits answer_token events in real-time
 """
 from __future__ import annotations
 
@@ -39,20 +44,13 @@ def _emit(state: PipelineState, event_type: SSEEventType, data: dict, **kw) -> N
     state.sse_queue.append(SSEEvent(event=event_type, run_id=state.run_id, data=data, **kw))
 
 
-# ── Fast path: SIMPLE queries ─────────────────────────────────────────────────
+# ── Fast path ─────────────────────────────────────────────────────────────────
 
 async def _fast_path(query: str, run_id: str, trace: PipelineTrace) -> AnswerResponse:
-    """
-    SIMPLE query bypass: Search → Answer only. Target < 3s.
-    Skips: planner, router, reason agent, evaluator, multi-hop.
-    """
     from agents.search import run_search_agent
     from agents.answer import run_answer_agent
-    from models.schemas import RouteDecision, RouteMode
-
     logger = get_logger("fast_path", run_id)
     logger.info("fast_path_start", query=query[:60])
-
     search_out = await run_search_agent(query, trace)
     answer = await run_answer_agent(
         query=query,
@@ -64,7 +62,7 @@ async def _fast_path(query: str, run_id: str, trace: PipelineTrace) -> AnswerRes
     return answer
 
 
-# ── Parallel supervisor agent execution ───────────────────────────────────────
+# ── Parallel retrieval ────────────────────────────────────────────────────────
 
 async def _run_parallel_retrieval(
     sub_queries: list[str],
@@ -158,7 +156,6 @@ async def _node_reason(state: dict) -> dict:
     merged_context = state.get("_merged_context", "")
 
     if not needs_reason_agent(ps.complexity):
-        # Skip reasoning for simple/medium queries
         d = ps.model_dump()
         d["_merged_context"] = merged_context
         return d
@@ -184,10 +181,10 @@ async def _node_reason(state: dict) -> dict:
             latency_ms=hop_out.total_latency_ms,
         ))
 
-    reason_outs = []
-    for so in search_proxies:
-        reason_outs.append(await run_reason_agent(so, ps.trace))
-        await asyncio.sleep(0.3)
+    # FIXED: run reason agents in PARALLEL (removed sequential sleep(0.3))
+    reason_outs = list(
+        await asyncio.gather(*[run_reason_agent(so, ps.trace) for so in search_proxies])
+    )
     ps.reason_outputs = reason_outs
 
     for ro in ps.reason_outputs:
@@ -203,6 +200,10 @@ async def _node_reason(state: dict) -> dict:
 
 
 async def _node_answer(state: dict) -> dict:
+    """
+    Blocking answer node — collects all streaming tokens internally.
+    The streaming is handled separately in stream_pipeline via _node_answer_stream.
+    """
     ps = PipelineState(**state)
     merged_context = state.get("_merged_context", "")
     _emit(ps, SSEEventType.PROGRESS, {"step": "Generating Answer..."})
@@ -239,6 +240,7 @@ async def _node_answer(state: dict) -> dict:
     _emit(ps, SSEEventType.ANSWER_CHUNK, {
         "answer": answer.answer,
         "citations": [c.model_dump() for c in answer.citations],
+        "follow_up_questions": answer.follow_up_questions,
     }, latency_ms=answer.latency_ms)
 
     d = ps.model_dump()
@@ -270,7 +272,6 @@ async def _node_save_memory(state: dict) -> dict:
 
 
 async def _node_persist_metrics(state: dict) -> dict:
-    """Persist query metrics to PostgreSQL asynchronously."""
     ps = PipelineState(**state)
     try:
         from db.engine import get_session
@@ -290,7 +291,7 @@ async def _node_persist_metrics(state: dict) -> dict:
     return ps.model_dump()
 
 
-# ── Node execution pipeline ───────────────────────────────────────────────────
+# ── Pipeline nodes list ───────────────────────────────────────────────────────
 
 _FULL_NODES = [
     _node_load_memory,
@@ -322,7 +323,6 @@ async def run_pipeline(request: QueryRequest) -> AnswerResponse:
     logger = get_logger("orchestrator", run_id)
     t0 = time.perf_counter()
 
-    # L2 cache check
     cached = await get_cached_answer(request.query)
     if cached:
         record_cache_hit("answer")
@@ -337,7 +337,6 @@ async def run_pipeline(request: QueryRequest) -> AnswerResponse:
     trace = PipelineTrace(run_id=run_id, query=request.query)
     logger.info("pipeline_start", query=request.query[:60], complexity=complexity)
 
-    # Fast path for SIMPLE queries
     if complexity == QueryComplexity.SIMPLE:
         answer = await asyncio.wait_for(_fast_path(request.query, run_id, trace), timeout=60)
         answer.run_id = run_id
@@ -369,7 +368,10 @@ async def run_pipeline(request: QueryRequest) -> AnswerResponse:
 
 
 async def stream_pipeline(request: QueryRequest) -> AsyncIterator[SSEEvent]:
-    """SSE streaming with progress events and cache."""
+    """
+    SSE streaming pipeline.
+    Emits progress events AND real-time answer tokens (SSEEventType.ANSWER_TOKEN).
+    """
     run_id = str(uuid.uuid4())
     logger = get_logger("stream", run_id)
     event_q: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
@@ -400,28 +402,166 @@ async def stream_pipeline(request: QueryRequest) -> AsyncIterator[SSEEvent]:
 
     async def _run():
         nonlocal seen
+        state = dict(initial)
         try:
-            state = dict(initial)
-            nodes = _FULL_NODES if complexity != QueryComplexity.SIMPLE else [
-                _node_load_memory, _node_classify, _node_answer, _node_save_memory
+            # Run all nodes EXCEPT the answer node
+            pre_answer_nodes = [
+                _node_load_memory,
+                _node_classify,
+                _node_plan,
+                _node_route,
+                _node_retrieve,
+                _node_build_context,
+                _node_reason,
             ]
-            for fn in nodes:
+
+            if complexity == QueryComplexity.SIMPLE:
+                # Fast path — just search
+                from agents.search import run_search_agent
+                _search_trace = PipelineTrace(run_id=run_id, query=request.query)
+                event_q.put_nowait(SSEEvent(
+                    event=SSEEventType.PROGRESS, run_id=run_id,
+                    data={"step": "Searching..."},
+                ))
+                search_out = await run_search_agent(request.query, _search_trace)
+                event_q.put_nowait(SSEEvent(
+                    event=SSEEventType.PROGRESS, run_id=run_id,
+                    data={"step": "Generating Answer..."},
+                ))
+
+                from agents.answer import stream_answer_agent, parse_streamed_answer
+                tokens_collected: list[str] = []
+                async for token in stream_answer_agent(
+                    query=request.query,
+                    reason_outputs=[],
+                    search_outputs=[search_out],
+                    trace=_search_trace,
+                ):
+                    event_q.put_nowait(SSEEvent(
+                        event=SSEEventType.ANSWER_TOKEN,
+                        run_id=run_id,
+                        data={"token": token},
+                    ))
+                    tokens_collected.append(token)
+
+                full_text = "".join(tokens_collected)
+                answer_text, citations = parse_streamed_answer(full_text, [], [search_out])
+                # Generate follow-ups
+                from agents.answer import generate_follow_ups
+                follow_ups = await generate_follow_ups(request.query, answer_text, citations)
+
+                event_q.put_nowait(SSEEvent(
+                    event=SSEEventType.ANSWER_CHUNK,
+                    run_id=run_id,
+                    data={
+                        "answer": answer_text,
+                        "citations": [c.model_dump() for c in citations],
+                        "follow_up_questions": follow_ups,
+                    },
+                ))
+                return
+
+            # Full path: run pre-answer nodes
+            for fn in pre_answer_nodes:
                 state = await fn(state)
                 ps = PipelineState(**{k: v for k, v in state.items() if not k.startswith("_")})
                 while seen < len(ps.sse_queue):
                     event_q.put_nowait(ps.sse_queue[seen])
                     seen += 1
+
+            ps = PipelineState(**{k: v for k, v in state.items() if not k.startswith("_")})
+            merged_context = state.get("_merged_context", "")
+
+            # Build search proxies for answer agent
+            from models.schemas import SearchOutput, SearchResult
+            search_proxies = [
+                SearchOutput(
+                    sub_query=ho.original_query,
+                    results=[
+                        SearchResult(
+                            title=f"[{hop.source.upper()}] hop {hop.hop_number}",
+                            url=f"internal://hop/{hop.hop_number}",
+                            snippet=hop.content_snippets[0][:300] if hop.content_snippets else "",
+                            source="serper",
+                        )
+                        for hop in ho.hops
+                    ],
+                    latency_ms=ho.total_latency_ms,
+                )
+                for ho in ps.hop_outputs
+            ]
+
+            # Stream answer tokens in real-time
+            event_q.put_nowait(SSEEvent(
+                event=SSEEventType.PROGRESS, run_id=run_id,
+                data={"step": "Generating Answer..."},
+            ))
+
+            from agents.answer import stream_answer_agent, parse_streamed_answer, generate_follow_ups
+            tokens_collected = []
+            async for token in stream_answer_agent(
+                query=request.query,
+                reason_outputs=ps.reason_outputs,
+                search_outputs=search_proxies,
+                trace=ps.trace,
+            ):
+                event_q.put_nowait(SSEEvent(
+                    event=SSEEventType.ANSWER_TOKEN,
+                    run_id=run_id,
+                    data={"token": token},
+                ))
+                tokens_collected.append(token)
+
+            full_text = "".join(tokens_collected)
+            answer_text, citations = parse_streamed_answer(full_text, ps.reason_outputs, search_proxies)
+            follow_ups = await generate_follow_ups(request.query, answer_text, citations)
+
+            event_q.put_nowait(SSEEvent(
+                event=SSEEventType.ANSWER_CHUNK,
+                run_id=run_id,
+                data={
+                    "answer": answer_text,
+                    "citations": [c.model_dump() for c in citations],
+                    "follow_up_questions": follow_ups,
+                },
+            ))
+
+            # Post-answer: evaluate + save memory
+            post_nodes = [_node_evaluate, _node_save_memory, _node_persist_metrics]
+            # Inject answer into state for post-processing
+            from models.schemas import AnswerResponse
+            ps.answer = AnswerResponse(
+                run_id=run_id,
+                query=request.query,
+                answer=answer_text,
+                citations=citations,
+                follow_up_questions=follow_ups,
+                total_tokens=trace.total_tokens,
+                latency_ms=0.0,
+                complexity=complexity,
+            )
+            state = ps.model_dump()
+            state["_merged_context"] = merged_context
+
+            for fn in post_nodes:
+                state = await fn(state)
+                ps2 = PipelineState(**{k: v for k, v in state.items() if not k.startswith("_")})
+                while seen < len(ps2.sse_queue):
+                    event_q.put_nowait(ps2.sse_queue[seen])
+                    seen += 1
+
         except Exception as exc:
-            event_q.put_nowait(SSEEvent(event=SSEEventType.ERROR, run_id=run_id, data={"error": str(exc)}))
+            log.error("stream_pipeline_error", error=str(exc))
+            event_q.put_nowait(
+                SSEEvent(event=SSEEventType.ERROR, run_id=run_id, data={"error": str(exc)})
+            )
         finally:
-            ps_final = PipelineState(**{k: v for k, v in state.items() if not k.startswith("_")})
             event_q.put_nowait(SSEEvent(
                 event=SSEEventType.TRACE_SUMMARY, run_id=run_id,
                 data={
                     "total_tokens": trace.total_tokens,
                     "total_latency_ms": trace.total_latency_ms,
                     "complexity": complexity,
-                    "eval": ps_final.eval_result.model_dump() if ps_final.eval_result else None,
                 },
             ))
             event_q.put_nowait(SSEEvent(event=SSEEventType.DONE, run_id=run_id, data={}))
