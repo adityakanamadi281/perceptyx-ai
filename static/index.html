@@ -570,23 +570,25 @@
     }
 
     .source-card {
-      background: var(--bg-card);
+      background: rgba(255, 255, 255, 0.02);
       border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 12px;
+      border-radius: 10px;
+      padding: 14px;
       cursor: pointer;
       transition: var(--trans);
       position: relative;
       overflow: visible;
       text-decoration: none;
       color: inherit;
-      display: block
+      display: block;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     }
 
     .source-card:hover {
-      background: var(--bg-card-hover);
-      border-color: rgba(255, 255, 255, 0.18);
-      transform: translateY(-1px)
+      background: rgba(255, 255, 255, 0.05);
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(20, 184, 166, 0.15);
     }
 
     .source-header {
@@ -801,11 +803,11 @@
 
     /* ── Bottom floating input ── */
     .bottom-search-container {
-      position: fixed;
+      position: absolute;
       bottom: 24px;
       left: 50%;
-      transform: translateX(calc(-50% + 130px));
-      width: calc(100% - 260px);
+      transform: translateX(-50%);
+      width: 100%;
       max-width: 860px;
       padding: 0 20px;
       z-index: 5;
@@ -927,6 +929,153 @@
     ::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.2)
     }
+
+    /* ── Sources Sidebar (Right) ── */
+    .sources-sidebar {
+      width: 320px;
+      background: var(--bg-sidebar);
+      border-left: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      z-index: 10;
+      flex-shrink: 0;
+      transition: var(--trans);
+    }
+    .sources-list-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* ── Follow-up question chips ── */
+    .follow-ups-section {
+      margin-top: 24px;
+      border-top: 1px solid var(--border-color);
+      padding-top: 18px
+    }
+
+    .follow-ups-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-bottom: 10px
+    }
+
+    .follow-ups-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    .follow-up-chip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #cbd5e1;
+      cursor: pointer;
+      text-align: left;
+      transition: var(--trans);
+      width: 100%
+    }
+
+    .follow-up-chip:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--accent);
+      color: var(--text-main)
+    }
+
+    .follow-up-chip::before {
+      content: "→";
+      color: var(--accent);
+      flex-shrink: 0;
+      font-size: 14px
+    }
+
+    /* ── Search mode selector ── */
+    .mode-selector {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap
+    }
+
+    .mode-pill {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-color);
+      border-radius: 9999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--trans);
+      color: var(--text-muted)
+    }
+
+    .mode-pill:hover {
+      background: var(--bg-card-hover);
+      color: var(--text-main)
+    }
+
+    .mode-pill.active {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: rgba(20, 184, 166, 0.06)
+    }
+
+    /* ── Streaming cursor ── */
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0
+      }
+    }
+
+    .stream-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 1em;
+      background: var(--accent);
+      margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite
+    }
+
+    /* ── Source loading placeholder ── */
+    .source-placeholder {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      height: 80px;
+      animation: pulse 1.5s ease-in-out infinite
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 0.4
+      }
+
+      50% {
+        opacity: 0.8
+      }
+    }
   </style>
 </head>
 
@@ -950,7 +1099,7 @@
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">Checking API...</span>
       </div>
-      <div>Model: <span style="color:var(--text-main);font-weight:500">Gemini 1.5 Flash</span></div>
+      <div>Model: <span style="color:var(--text-main);font-weight:500">Gemini 2.5 Flash</span></div>
       <div>version-0.1</div>
     </div>
   </aside>
@@ -997,25 +1146,6 @@
             </button>
           </div>
         </div>
-
-        <div class="suggestions-grid">
-          <div class="suggestion-card" onclick="setQuery('Latest advances in quantum computing 2025')">
-            <div class="suggestion-title">Quantum Computing</div>
-            <div class="suggestion-desc">Recent breakthroughs and timelines</div>
-          </div>
-          <div class="suggestion-card" onclick="setQuery('openai/whisper commits and recent PRs')">
-            <div class="suggestion-title">GitHub: Whisper</div>
-            <div class="suggestion-desc">Recent commits and pull requests</div>
-          </div>
-          <div class="suggestion-card" onclick="setQuery('Breaking news: AI regulation today')">
-            <div class="suggestion-title">News: AI Policy</div>
-            <div class="suggestion-desc">Latest regulatory headlines</div>
-          </div>
-          <div class="suggestion-card" onclick="setQuery('Compare Next.js and Remix for production apps')">
-            <div class="suggestion-title">Web Development</div>
-            <div class="suggestion-desc">Framework deep-dive with local docs</div>
-          </div>
-        </div>
       </div>
 
       <!-- Loading -->
@@ -1037,10 +1167,6 @@
         <h2 class="query-header" id="queryTitle"></h2>
         <div id="modalBadges"></div>
 
-        <div>
-          <div class="section-title"><i data-lucide="book-open" style="width:15px;height:15px"></i> Sources</div>
-          <div class="sources-grid" id="sourcesGrid"></div>
-        </div>
 
         <div>
           <div class="section-title"><i data-lucide="text" style="width:15px;height:15px"></i> Answer</div>
@@ -1100,6 +1226,19 @@
       </div>
     </div>
   </main>
+
+  <!-- ── Sources Sidebar (Right) ── -->
+  <aside class="sources-sidebar" id="sourcesSidebar" style="display: none;">
+    <div class="sidebar-header" style="padding: 24px 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color);">
+      <div class="logo-box" style="background: linear-gradient(135deg, #3b82f6, var(--accent)); box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);"><i data-lucide="book-open" style="width:16px;height:16px;color:#000"></i></div>
+      <span class="logo-text" style="font-family: var(--font-heading); font-weight: 700; font-size: 16px; letter-spacing: -0.5px;">Sources</span>
+    </div>
+    <div class="sources-list-container">
+      <div class="sources-grid" id="sourcesGrid" style="display: flex; flex-direction: column; gap: 12px; grid-template-columns: none;">
+        <!-- Sources list will be dynamically rendered here -->
+      </div>
+    </div>
+  </aside>
 
   <script>
     // ── State ─────────────────────────────────────────────────────────────────────
@@ -1240,6 +1379,7 @@
       document.getElementById('landingView').style.display = 'none';
       document.getElementById('resultsView').style.display = 'none';
       document.getElementById('bottomSearchContainer').classList.remove('active');
+      document.getElementById('sourcesSidebar').style.display = 'none';
       const lc = document.getElementById('loadingContainer');
       lc.style.display = 'flex';
       renderPipelineStages('memory');
@@ -1320,12 +1460,22 @@
                 if (line.startsWith('event:')) {
                   const evtType = line.slice(6).trim();
                   handleSSEEvent(evtType, null);
+                  currentEventType = evtType;
                 }
                 if (line.startsWith('data:')) {
                   try {
                     const payload = JSON.parse(line.slice(5).trim());
                     handleSSEData(payload);
-                    if (payload.answer) finalData = buildResponseFromSSE(payload, query);
+                    if (currentEventType === 'answer_token' && payload.token) {
+                      handleAnswerToken(payload.token);
+                    }
+                    if (currentEventType === 'answer_chunk' && payload.answer) {
+                      finalData = buildResponseFromSSE(payload, query);
+                      finaliseStreamedAnswer(payload.answer, payload.citations || [], payload.follow_up_questions || []);
+                    }
+                    if (payload.answer && currentEventType !== 'answer_token') {
+                      finalData = buildResponseFromSSE(payload, query);
+                    }
                   } catch { }
                 }
               }
@@ -1341,13 +1491,49 @@
       const stageMap = {
         'plan_done': 'plan', 'route_decided': 'route',
         'hop_result': 'retrieve', 'reason_chunk': 'reason',
-        'answer_chunk': 'answer', 'eval_done': 'eval',
+        'answer_chunk': 'answer', 'answer_token': 'answer', 'eval_done': 'eval',
       };
       if (stageMap[type]) renderPipelineStages(stageMap[type]);
     }
 
     function handleSSEData(payload) {
       updateLiveStat(payload.token_delta, payload.latency_ms, payload.agent);
+    }
+
+    // Called per-token during streaming
+    function handleAnswerToken(token) {
+      const answerDiv = document.getElementById('answerText');
+      // First token: initialise streaming container
+      if (!answerDiv._streaming) {
+        answerDiv._streaming = true;
+        answerDiv._rawTokens = [];
+        document.getElementById('resultsView').style.display = 'flex';
+        document.getElementById('loadingContainer').style.display = 'none';
+        document.getElementById('bottomSearchContainer').classList.add('active');
+        answerDiv.innerHTML = '';
+      }
+      answerDiv._rawTokens.push(token);
+      // Render accumulated tokens progressively
+      const accumulated = answerDiv._rawTokens.join('');
+      answerDiv.innerHTML = parseAnswer(accumulated) + '<span class="stream-cursor"></span>';
+      // Auto-scroll the content area
+      const ca = answerDiv.closest('.content-area');
+      if (ca) ca.scrollTop = ca.scrollHeight;
+    }
+
+    function finaliseStreamedAnswer(answer, citations, followUps) {
+      const answerDiv = document.getElementById('answerText');
+      answerDiv._streaming = false;
+      answerDiv._rawTokens = [];
+      answerDiv.innerHTML = parseAnswer(answer);
+      // Render source cards now we have citations
+      renderSourceCards(citations);
+      if (citations && citations.length > 0) {
+        document.getElementById('sourcesSidebar').style.display = 'flex';
+      } else {
+        document.getElementById('sourcesSidebar').style.display = 'none';
+      }
+      if (followUps && followUps.length) renderFollowUps(followUps);
     }
 
     function buildResponseFromSSE(payload, query) {
@@ -1400,6 +1586,13 @@
 
       document.getElementById('queryTitle').textContent = thread.query;
 
+      const cits = data.citations || [];
+      if (cits.length > 0) {
+        document.getElementById('sourcesSidebar').style.display = 'flex';
+      } else {
+        document.getElementById('sourcesSidebar').style.display = 'none';
+      }
+
       // Multimodal badges
       const mb = document.getElementById('modalBadges');
       mb.innerHTML = '';
@@ -1411,48 +1604,14 @@
       }
 
       // Sources
-      const grid = document.getElementById('sourcesGrid');
-      grid.innerHTML = '';
-      const cits = data.citations || [];
-      if (cits.length === 0) {
-        grid.innerHTML = '<div style="color:var(--text-muted);font-size:13px;grid-column:1/-1">No sources cited.</div>';
-      } else {
-        cits.forEach(c => {
-          const card = document.createElement('a');
-          card.href = c.url || '#';
-          card.target = '_blank';
-          card.rel = 'noopener noreferrer';
-          card.className = 'source-card';
-          card.id = `src-${c.index}`;
-
-          let domain = c.repo || 'Source';
-          try { domain = new URL(c.url).hostname.replace('www.', ''); } catch { }
-
-          const srcType = c.source_type || 'web';
-          const srcLabel = { web: 'WEB', local: 'LOCAL', news: 'NEWS', github: 'GH' }[srcType] || 'WEB';
-
-          let meta = '';
-          if (srcType === 'local' && c.chunk_id) meta = `chunk: ${c.chunk_id}`;
-          else if (srcType === 'local' && c.source_file) meta = c.source_file;
-          else if (srcType === 'news' && c.published_at) meta = c.published_at.slice(0, 10);
-          else if (srcType === 'github' && c.repo) meta = c.repo;
-
-          card.innerHTML = `
-        <div class="source-header">
-          <img class="source-favicon" src="https://www.google.com/s2/favicons?domain=${domain}&sz=64" onerror="this.style.display='none'" alt="">
-          <span class="source-domain">${domain}</span>
-          <span class="source-badge ${srcType}">${srcLabel}</span>
-        </div>
-        <div class="source-title">${c.title || 'Untitled'}</div>
-        ${meta ? `<div class="source-meta">${meta}</div>` : ''}
-        <div class="source-tooltip">${c.relevant_snippet || 'No preview'}</div>
-      `;
-          grid.appendChild(card);
-        });
-      }
+      renderSourceCards(cits);
 
       // Answer
       document.getElementById('answerText').innerHTML = parseAnswer(data.answer || '');
+
+      // Follow-up questions
+      const fu = data.follow_up_questions || [];
+      renderFollowUps(fu);
 
       // Eval
       const evalSec = document.getElementById('evalSection');
@@ -1543,6 +1702,7 @@
       document.getElementById('landingView').style.display = 'flex';
       document.getElementById('resultsView').style.display = 'none';
       document.getElementById('bottomSearchContainer').classList.remove('active');
+      document.getElementById('sourcesSidebar').style.display = 'none';
       const ta = document.getElementById('mainQuery');
       ta.value = ''; ta.style.height = '60px';
       document.getElementById('sendBtn').disabled = true;
@@ -1584,6 +1744,91 @@
         list.appendChild(li);
       });
       lucide.createIcons();
+    }
+
+    function renderSourceCards(cits) {
+      const grid = document.getElementById('sourcesGrid');
+      grid.innerHTML = '';
+      if (!cits || cits.length === 0) {
+        grid.innerHTML = '<div style="color:var(--text-muted);font-size:13px;grid-column:1/-1">No sources cited.</div>';
+        return;
+      }
+      cits.forEach(c => {
+        const card = document.createElement('a');
+        card.href = c.url || '#';
+        card.target = '_blank';
+        card.rel = 'noopener noreferrer';
+        card.className = 'source-card';
+        card.id = `src-${c.index}`;
+        let domain = c.repo || 'Source';
+        try { domain = new URL(c.url).hostname.replace('www.', ''); } catch { }
+        const srcType = c.source_type || 'web';
+        const srcLabel = { web: 'WEB', local: 'LOCAL', news: 'NEWS', github: 'GH' }[srcType] || 'WEB';
+        let meta = '';
+        if (srcType === 'local' && c.chunk_id) meta = `chunk: ${c.chunk_id}`;
+        else if (srcType === 'local' && c.source_file) meta = c.source_file;
+        else if (srcType === 'news' && c.published_at) meta = c.published_at.slice(0, 10);
+        else if (srcType === 'github' && c.repo) meta = c.repo;
+        card.innerHTML = `
+          <div class="source-header">
+            <img class="source-favicon" src="https://www.google.com/s2/favicons?domain=${domain}&sz=64" onerror="this.style.display='none'" alt="">
+            <span class="source-domain">${domain}</span>
+            <span class="source-badge ${srcType}">${srcLabel}</span>
+          </div>
+          <div class="source-title">${c.title || 'Untitled'}</div>
+          ${meta ? `<div class="source-meta">${meta}</div>` : ''}
+          <div class="source-tooltip">${c.relevant_snippet || 'No preview'}</div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function renderFollowUps(questions) {
+      // Remove existing follow-ups section if any
+      const existing = document.getElementById('followUpsSection');
+      if (existing) existing.remove();
+      if (!questions || questions.length === 0) return;
+      const rv = document.getElementById('resultsView');
+      const section = document.createElement('div');
+      section.id = 'followUpsSection';
+      section.className = 'follow-ups-section';
+      section.innerHTML = '<div class="follow-ups-title">Related Questions</div>';
+      const grid = document.createElement('div');
+      grid.className = 'follow-ups-grid';
+      questions.forEach(q => {
+        const btn = document.createElement('button');
+        btn.className = 'follow-up-chip';
+        btn.textContent = q;
+        btn.onclick = () => {
+          const ta = document.getElementById('bottomQuery');
+          if (ta) { ta.value = q; ta.dispatchEvent(new Event('input')); submitQuery(true); }
+          else {
+            const mta = document.getElementById('mainQuery');
+            if (mta) { mta.value = q; mta.dispatchEvent(new Event('input')); submitQuery(false); }
+          }
+        };
+        grid.appendChild(btn);
+      });
+      section.appendChild(grid);
+      rv.appendChild(section);
+    }
+
+    // ── Search mode selector ──────────────────────────────────────────────────
+    let activeMode = 'web';
+    function setMode(el, mode) {
+      document.querySelectorAll('.mode-pill').forEach(p => p.classList.remove('active'));
+      el.classList.add('active');
+      activeMode = mode;
+    }
+
+    // ── localStorage size-based eviction ─────────────────────────────────────
+    function pruneStorage() {
+      try {
+        while (JSON.stringify(threads).length > 4 * 1024 * 1024 && threads.length > 5) {
+          threads.pop();
+        }
+        localStorage.setItem('pa_threads', JSON.stringify(threads));
+      } catch (e) { }
     }
 
     function copyAnswer() {
