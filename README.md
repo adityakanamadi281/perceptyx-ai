@@ -1,34 +1,37 @@
-# PerceptyxAI
+# Perceptyx-AI
 
-A production-grade, Perplexity-class AI search engine built for high-performance and deep multi-source research.
+A production-grade, Perplexity-class AI search engine built for high-performance, real-time query answering, and deep multi-source research.
 
 ---
 
 ## 🚀 Features
 
-- **Intelligent Query Complexity Routing**: Dynamically classifies user queries (SIMPLE, MEDIUM, COMPLEX, or RESEARCH) to optimize pathing, latency, and resource utilization.
-- **Parallel Multi-Source Retrieval**: Searches simultaneously across Google (Serper), DuckDuckGo (fallback), local vector stores, news sources, and GitHub.
-- **Advanced Hybrid RAG**: Uses a hybrid search engine (Dense Vector Embeddings + BM25 Lexical Search) with Reciprocal Rank Fusion (RRF) and BGE Cross-Encoder Reranking (mapping top-50 candidates to top-10).
-- **Multi-Level Caching**: Decreases latency using a multi-tiered cache layout (L1 in-memory, L2 Redis with distributed locks/pubsub, L3 PostgreSQL persistence).
-- **Agentic Multi-Step Reasoning**: Leverages dedicated planning and reasoning agents for complex multi-hop queries, with automated fallback from Gemini to Cloudflare Workers AI.
-- **Asynchronous Deep Research**: Handles long-running research tasks in the background via ARQ queues and workers (scraping, crawling, embedding, and execution).
-- **Multimodal Capabilities**: Integrates speech-to-text via Faster-Whisper and processes queries containing rich media inputs.
-- **Built-in Quality Evaluation**: Evaluates research answers dynamically using an automated LLM-in-the-loop evaluator.
+- **Real-Time Token Streaming**: Real-time token-by-token answer streaming on the frontend using Server-Sent Events (SSE) with progressive markdown parsing, auto-scrolling, and inline citation rendering.
+- **Intelligent Query Complexity Classifier**: Dynamically classifies user queries (`SIMPLE`, `MEDIUM`, `COMPLEX`, or `RESEARCH`) using rules and LLM fallback checks to select the fastest, most cost-effective execution path.
+- **Resilient Multi-Provider Search Aggregator**: Runs Serper, Tavily, and Firecrawl searches in parallel. Automatically deduplicates results by domain, filters URL duplicates, boosts authoritative sources, and falls back to DuckDuckGo in case of complete API failure.
+- **Advanced Cross-Encoder Reranking**: Re-orders scraped snippets and search results using a local Sentence-Transformers cross-encoder (defaulting to the highly efficient `ms-marco-MiniLM-L-6-v2`), executing inference on a thread pool to avoid blocking the event loop.
+- **High-Performance 2-Tier Scraper**: Completely replaces native Playwright rendering with a fast HTTPX crawler and a Jina Reader (`r.jina.ai`) fallback tier, bypassing paywalls and JS-heavy sites without container bloat. Includes duplicate content fingerprinting and sentence-boundary truncation.
+- **Redis Semantic Caching**: Employs sentence-transformer embeddings to cache query-answer pairs. Uses dot-product cosine similarity over Redis key-scans with a configurable match threshold (`0.92`) to prevent duplicate LLM calls and search costs.
+- **Structured Deep Research Worker**: Redesigns asynchronous reports into a 4-phase worker pipeline: outline planning, semaphore-limited parallel section crawling/reasoning, evidence-based drafting, and executive summary assembly.
+- **Dynamic Frontend Dashboard**: An interactive UI presenting real-time stage tracking badges, a dedicated sliding right sidebar for source citations, interactive follow-up question chips, and localStorage data pruning.
+- **Local Directory Document Ingester**: Features a command-line script to parse and chunk local folder contents (PDFs, Markdown, text) and ingest them directly into ChromaDB.
 - **Production Observability**: Full metric integration with Prometheus, Grafana, OpenTelemetry, LangSmith, and structured logs.
 
 ---
 
 ## 🛠️ Tech Stack 
 
-- **Framework**: FastAPI & Uvicorn (High-performance ASGI server)
-- **Agent Framework**: LangChain 
-- **Databases & Cache**: PostgreSQL (via SQLAlchemy & asyncpg), ChromaDB (Vector DB), and Redis (L2 caching & lock management)
-- **LLM Providers**: Google Gemini (primary) and Cloudflare Workers AI (fallback/Llama models)
-- **Information Retrieval**: Sentence-Transformers (Embeddings), BGE Cross-Encoder (Reranking), and Rank-BM25 (Lexical search)
-- **Background Workers**: ARQ (Redis-based job queue)
-- **Scraping & Crawling**: Playwright, BeautifulSoup4, and Readability
+- **Backend ASGI Framework**: FastAPI & Uvicorn
+- **Agent Orchestration**: LangChain Core
+- **Distributed Cache & Queue**: Redis (L2 semantic cache, distributed locks, and ARQ background job queue)
+- **Primary Database**: PostgreSQL (via SQLAlchemy & asyncpg)
+- **Vector Search Database**: ChromaDB (with local sentence-transformers embeddings)
+- **AI Models & LLM Providers**: Google Gemini (primary `SafeChatGoogleGenerativeAI` wrapper) and Cloudflare Workers AI (failover tier)
+- **Inference & Reranking**: Sentence-Transformers (`all-MiniLM-L6-v2` for cache/RAG embeddings, `ms-marco-MiniLM-L-6-v2` for cross-encoder reranking)
+- **Background Workers**: ARQ (Redis-based background scheduler)
+- **Scraping Tools**: HTTPX, Jina Reader API, Readability-lxml, and BeautifulSoup4
 - **Observability**: Prometheus, Grafana, OpenTelemetry, and structlog
-- **Package Manager / Build**: Python >= 3.11, Hatchling
+- **Package Management**: [uv](https://github.com/astral-sh/uv) (Fast Python packager)
 
 ---
 
@@ -36,21 +39,42 @@ A production-grade, Perplexity-class AI search engine built for high-performance
 
 ```text
 ├── agents/             # Core agent logic (answering, RAG, reasoning, router, search)
-├── api/                # FastAPI application routes (main entrypoint, query handling, SSE)
-├── config/             # Environment variables and configuration settings
-├── core/               # Orchestration engine (complexity routing, caching, planning, context)
+│   ├── answer.py       # Streaming and citation-verified answer synthesis
+│   ├── router.py       # Concurrent sub-query routing classifier
+│   └── search.py       # Aggregator search agent with cross-encoder rerank trigger
+├── api/                # FastAPI application routes (SSE channels, query entrypoints)
+│   ├── main.py         # Application lifespan, mounts, and startup pre-warming
+│   └── query.py        # Research task queueing endpoints
+├── config/             # Environment variables and Pydantic configuration schemas
+│   └── settings.py     # Application and provider setting parameters
+├── core/               # Orchestration engine (complexity routing, caching, planning)
+│   ├── cache.py        # Redis connection pools and resilient ARQ settings
+│   ├── complexity.py   # Heuristic and LLM fallback query classifiers
+│   ├── orchestrator.py # Fast-path and full-path SSE streaming pipelines
+│   └── semantic_cache.py # Redis-backed embedding cosine similarity caching
 ├── db/                 # DB schemas, models, and connection engine (PostgreSQL)
 ├── evaluation/         # Auto-evaluators to score generated answers
 ├── memory/             # Persistent chat/session memory store
 ├── migrations/         # Alembic database migration scripts
 ├── models/             # Pydantic request/response schemas
+│   └── schemas.py      # Unified API definitions and event types
 ├── monitoring/         # Configuration files for Prometheus and Grafana dashboards
 ├── providers/          # Integrations for LLMs (Gemini, Cloudflare Workers AI fallback)
+│   └── llm.py          # Unified provider fallback chain, rate limits, and async stream generators
 ├── rag/                # Hybrid search, reranker, and vector store ingestion scripts
-├── scripts/            # Shell and Python utility scripts
+│   ├── ingester.py     # Document parser and chunker logic
+│   └── reranker.py     # Thread-safe cross-encoder search reranking
+├── scripts/            # CLI utilities and startup scripts
+│   └── ingest_directory.py # local folder data ingest tool for ChromaDB
 ├── static/             # Static files and assets
-├── tools/              # Agent tools (Playwright scraping, DuckDuckGo, GitHub, News, Serper, Whispers)
+│   └── index.html      # Stream-capable single-page web dashboard
+├── tools/              # Agent tools (DDG, GitHub, News, Serper, Whispers)
+│   ├── search_aggregator.py # Multi-source aggregator, de-duplicator, and scorer
+│   ├── tavily_search.py     # Tavily Search API client
+│   └── firecrawl_search.py  # Firecrawl Search API client and deep scraper
 └── workers/            # Async ARQ task queue workers (crawl, embed, research, search)
+    ├── settings.py     # Resilient Worker connection settings
+    └── research_worker.py  # Redesigned 4-phase deep research worker pipeline
 ```
 
 ---
@@ -69,19 +93,17 @@ Copy the sample environment file and fill in your keys:
 ```bash
 cp .env.example .env
 ```
-Update the values in `.env` for your database configuration, `GEMINI_API_KEY`, `SERPER_API_KEY`, and optional Cloudflare Workers credentials.
+Update the values in `.env` for your database configuration, `GEMINI_API_KEY`, `SERPER_API_KEY`. To enable aggregate providers, fill in `TAVILY_API_KEY` and `FIRECRAWL_API_KEY`.
 
 ### 3. Installation
 Initialize the virtual environment and install all dependencies using `uv`:
 ```bash
 uv sync
 ```
-*Note: This automatically creates a `.venv` virtual environment and installs the project and its dependencies based on `pyproject.toml` and `uv.lock`.*
 
 ### 4. Run Services
-You can run commands directly using `uv run` (which executes them within the virtual environment context), or manually activate the virtual environment beforehand:
 
-**To activate manually:**
+You can activate the virtual environment manually:
 ```bash
 # On Windows (PowerShell)
 .venv\Scripts\Activate.ps1
@@ -91,7 +113,6 @@ source .venv/bin/activate
 ```
 
 #### Step A: Start Infrastructure (PostgreSQL & Redis)
-
 **Using Docker (Recommended):**
 ```bash
 docker-compose up -d
@@ -99,17 +120,15 @@ docker-compose up -d
 
 **Natively (Without Docker):**
 Ensure that both PostgreSQL and Redis services are running on your local machine:
-* **PostgreSQL**: Standard service active on port `5432` (ensure the credentials in [.env](file:///c:/Users/adity/DS_Projects/interview-project/perplexity_agent/.env#L19) match your local setup).
+* **PostgreSQL**: Standard service active on port `5432`.
 * **Redis**: Standard service active on port `6379`.
-  * *On Windows (WSL)*: `sudo service redis-server start`
-  * *On Windows (Native)*: Run `.\redis-server.exe` in your Redis directory.
 
 #### Step B: Apply Database Migrations
 ```bash
 uv run alembic upgrade head
 ```
 
-#### Step C: Start the FastAPI API Server
+#### Step C: Start the FastAPI Server
 ```bash
 uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
@@ -120,7 +139,21 @@ In a separate terminal, start the background queue:
 uv run python -m arq workers.settings.WorkerSettings
 ```
 
-### 5. Accessing the Applications
-- **API Swagger Documentation**: http://localhost:8000/docs
-- **Grafana Dashboards**: http://localhost:3000 (Default credentials: admin / admin)
-- **Prometheus UI**: http://localhost:9090
+---
+
+## 📂 Local Knowledge Base Ingestion
+
+To populate your local RAG search index from a folder of documents (PDFs, Markdown, plain text), use the built-in CLI ingester:
+```bash
+uv run python scripts/ingest_directory.py --dir ./path/to/your/documents
+```
+*By default, the script reads from `./data/raw_docs` and writes directly to ChromaDB.*
+
+---
+
+## 🔗 Accessing the Application
+
+- **Web Dashboard Interface**: [http://localhost:8000](http://localhost:8000)
+- **API Swagger Interactive Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Grafana Metrics Dashboard**: [http://localhost:3000](http://localhost:3000) (admin / admin)
+- **Prometheus Metrics Collector**: [http://localhost:9090](http://localhost:9090)
