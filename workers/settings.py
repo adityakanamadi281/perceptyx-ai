@@ -5,7 +5,7 @@ ARQ worker pool configuration.
 """
 from __future__ import annotations
 
-from arq.connections import RedisSettings
+from core.cache import get_arq_redis_settings
 from config.settings import settings as app_settings
 
 
@@ -18,7 +18,7 @@ class WorkerSettings:
         "workers.research_worker.deep_research",
         "workers.evaluation_worker.evaluate_async",
     ]
-    redis_settings = RedisSettings.from_dsn(app_settings.redis_url)
+    redis_settings = get_arq_redis_settings()
     max_jobs = app_settings.arq_max_jobs
     job_timeout = app_settings.arq_job_timeout
     keep_result = 3600  # keep job results for 1 hour

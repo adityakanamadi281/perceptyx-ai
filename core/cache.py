@@ -25,16 +25,38 @@ _pool: ConnectionPool | None = None
 def _get_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
+        from redis.asyncio.retry import Retry
+        from redis.backoff import ExponentialBackoff
+        from redis.exceptions import ConnectionError, TimeoutError
+
+        retry = Retry(ExponentialBackoff(), 5)
         _pool = ConnectionPool.from_url(
             settings.redis_url,
             max_connections=settings.redis_pool_size,
             decode_responses=True,
+            retry=retry,
+            retry_on_timeout=True,
+            retry_on_error=[ConnectionError, TimeoutError],
         )
     return _pool
 
 
 def get_redis() -> Redis:
     return Redis(connection_pool=_get_pool())
+
+
+def get_arq_redis_settings() -> Any:
+    """Return resilient RedisSettings for ARQ workers."""
+    from arq.connections import RedisSettings
+    from redis.asyncio.retry import Retry
+    from redis.backoff import ExponentialBackoff
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    r_settings = RedisSettings.from_dsn(settings.redis_url)
+    r_settings.retry_on_timeout = True
+    r_settings.retry_on_error = [ConnectionError, TimeoutError]
+    r_settings.retry = Retry(ExponentialBackoff(), 5)
+    return r_settings
 
 
 def _hash(text: str) -> str:
