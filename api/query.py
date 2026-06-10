@@ -88,9 +88,8 @@ async def start_research(body: ResearchRequest):
 
     try:
         from arq import create_pool
-        from arq.connections import RedisSettings
-        from config.settings import settings
-        pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+        from core.cache import get_arq_redis_settings
+        pool = await create_pool(get_arq_redis_settings())
         await pool.enqueue_job(
             "workers.research_worker.deep_research",
             job_id=job_id,

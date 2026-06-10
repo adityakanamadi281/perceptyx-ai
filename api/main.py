@@ -56,6 +56,17 @@ async def lifespan(app: FastAPI):
         log.warning("redis_unavailable", error=str(exc))
 
     Path("./data").mkdir(exist_ok=True)
+
+    # Pre-warm reranker model
+    if settings.enable_reranking:
+        try:
+            from rag.reranker import _get_reranker
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, _get_reranker)
+            log.info("reranker_prewarm_scheduled")
+        except Exception as exc:
+            log.warning("reranker_prewarm_failed", error=str(exc))
+
     log.info("app_startup", host=settings.app_host, port=settings.app_port)
     yield
     log.info("app_shutdown")
@@ -103,8 +114,8 @@ def create_app() -> FastAPI:
             # Offload to ARQ worker
             try:
                 from arq import create_pool
-                from arq.connections import RedisSettings
-                pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+                from core.cache import get_arq_redis_settings
+                pool = await create_pool(get_arq_redis_settings())
                 await pool.enqueue_job("workers.embedding_worker.embed_documents", file_path=str(tmp))
                 return {"file": file.filename, "status": "queued"}
             except Exception:
