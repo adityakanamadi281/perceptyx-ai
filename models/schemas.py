@@ -210,9 +210,10 @@ class AnswerResponse(BaseModel):
     query: str
     answer: str
     citations: list[Citation]
+    follow_up_questions: list[str] = Field(default_factory=list)
     total_tokens: int
     latency_ms: float
-    complexity: str = "MEDIUM"
+    complexity: QueryComplexity = QueryComplexity.MEDIUM
     cache_hit: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     image_analysis: ImageAnalysis | None = None
@@ -268,6 +269,7 @@ class SSEEventType(str, Enum):
     HOP_RESULT = "hop_result"
     REASON_CHUNK = "reason_chunk"
     ANSWER_CHUNK = "answer_chunk"
+    ANSWER_TOKEN = "answer_token"
     EVAL_DONE = "eval_done"
     TRACE_SUMMARY = "trace_summary"
     CACHE_HIT = "cache_hit"
