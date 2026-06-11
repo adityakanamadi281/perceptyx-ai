@@ -19,22 +19,27 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
 
 import structlog
 
 from config.settings import settings
 from core.cache import (
-    get_cached_answer, set_cached_answer,
-    get_cached_query, set_cached_query,
-    publish_event,
+    get_cached_answer,
+    set_cached_answer,
 )
-from core.complexity import classify_query, needs_planner, needs_reason_agent, needs_evaluation
-from core.observability import get_logger, record_latency, record_cache_hit, record_cache_miss
+from core.complexity import classify_query, needs_evaluation, needs_planner, needs_reason_agent
+from core.observability import get_logger, record_cache_hit, record_cache_miss, record_latency
 from memory.store import get_context_string, save_turn
 from models.schemas import (
-    AnswerResponse, Citation, HopChainOutput, PipelineState, PipelineTrace,
-    QueryComplexity, QueryRequest, SSEEvent, SSEEventType,
+    AnswerResponse,
+    HopChainOutput,
+    PipelineState,
+    PipelineTrace,
+    QueryComplexity,
+    QueryRequest,
+    SSEEvent,
+    SSEEventType,
 )
 
 log = structlog.get_logger()
@@ -47,8 +52,8 @@ def _emit(state: PipelineState, event_type: SSEEventType, data: dict, **kw) -> N
 # ── Fast path ─────────────────────────────────────────────────────────────────
 
 async def _fast_path(query: str, run_id: str, trace: PipelineTrace) -> AnswerResponse:
-    from agents.search import run_search_agent
     from agents.answer import run_answer_agent
+    from agents.search import run_search_agent
     logger = get_logger("fast_path", run_id)
     logger.info("fast_path_start", query=query[:60])
     search_out = await run_search_agent(query, trace)
@@ -334,6 +339,17 @@ async def run_pipeline(request: QueryRequest) -> AnswerResponse:
     if request.force_research:
         complexity = QueryComplexity.RESEARCH
 
+    if complexity == QueryComplexity.SIMPLE:
+        from agents.router import _corpus_match_score
+        corpus_score = _corpus_match_score(request.query)
+        if corpus_score >= settings.rag_score_threshold:
+            complexity = QueryComplexity.MEDIUM
+            logger.info(
+                "upgraded_complexity_for_kb_match",
+                query=request.query[:60],
+                corpus_score=corpus_score,
+            )
+
     trace = PipelineTrace(run_id=run_id, query=request.query)
     logger.info("pipeline_start", query=request.query[:60], complexity=complexity)
 
@@ -389,6 +405,17 @@ async def stream_pipeline(request: QueryRequest) -> AsyncIterator[SSEEvent]:
     if request.force_research:
         complexity = QueryComplexity.RESEARCH
 
+    if complexity == QueryComplexity.SIMPLE:
+        from agents.router import _corpus_match_score
+        corpus_score = _corpus_match_score(request.query)
+        if corpus_score >= settings.rag_score_threshold:
+            complexity = QueryComplexity.MEDIUM
+            logger.info(
+                "upgraded_complexity_for_kb_match",
+                query=request.query[:60],
+                corpus_score=corpus_score,
+            )
+
     trace = PipelineTrace(run_id=run_id, query=request.query)
     initial = PipelineState(
         run_id=run_id,
@@ -429,7 +456,7 @@ async def stream_pipeline(request: QueryRequest) -> AsyncIterator[SSEEvent]:
                     data={"step": "Generating Answer..."},
                 ))
 
-                from agents.answer import stream_answer_agent, parse_streamed_answer
+                from agents.answer import parse_streamed_answer, stream_answer_agent
                 tokens_collected: list[str] = []
                 async for token in stream_answer_agent(
                     query=request.query,
@@ -497,7 +524,11 @@ async def stream_pipeline(request: QueryRequest) -> AsyncIterator[SSEEvent]:
                 data={"step": "Generating Answer..."},
             ))
 
-            from agents.answer import stream_answer_agent, parse_streamed_answer, generate_follow_ups
+            from agents.answer import (
+                generate_follow_ups,
+                parse_streamed_answer,
+                stream_answer_agent,
+            )
             tokens_collected = []
             async for token in stream_answer_agent(
                 query=request.query,
