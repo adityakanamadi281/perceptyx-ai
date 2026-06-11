@@ -11,16 +11,13 @@ import hashlib
 from pathlib import Path
 
 import structlog
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import (
-    DirectoryLoader,
     PyPDFLoader,
     TextLoader,
-    UnstructuredMarkdownLoader,
 )
 from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from config.settings import settings
 from rag.vectorstore import get_vectorstore
 
 log = structlog.get_logger()
@@ -33,7 +30,7 @@ _SPLITTER = RecursiveCharacterTextSplitter(
 
 _LOADER_MAP = {
     ".pdf": PyPDFLoader,
-    ".md": UnstructuredMarkdownLoader,
+    ".md": TextLoader,
     ".txt": TextLoader,
 }
 
@@ -58,7 +55,10 @@ async def ingest_file(path: str | Path) -> int:
     if loader_cls is None:
         raise ValueError(f"Unsupported file type: {suffix}")
 
-    loader = loader_cls(str(p))
+    if loader_cls is TextLoader:
+        loader = TextLoader(str(p), encoding="utf-8")
+    else:
+        loader = loader_cls(str(p))
     raw_docs: list[Document] = loader.load()
     chunks = _SPLITTER.split_documents(raw_docs)
 
