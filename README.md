@@ -26,7 +26,7 @@ A production-grade, Perplexity-class AI search engine built for high-performance
 - **Distributed Cache & Queue**: Redis (L2 semantic cache, distributed locks, and ARQ background job queue)
 - **Primary Database**: PostgreSQL (via SQLAlchemy & asyncpg)
 - **Vector Search Database**: ChromaDB (with local sentence-transformers embeddings)
-- **AI Models & LLM Providers**: Google Gemini (primary `SafeChatGoogleGenerativeAI` wrapper) and Cloudflare Workers AI (failover tier)
+- **AI Models & LLM Providers**: Gemini 3.5 flash ,  and Kimi k-2.6 (fallback)
 - **Inference & Reranking**: Sentence-Transformers (`all-MiniLM-L6-v2` for cache/RAG embeddings, `ms-marco-MiniLM-L-6-v2` for cross-encoder reranking)
 - **Background Workers**: ARQ (Redis-based background scheduler)
 - **Scraping Tools**: HTTPX, Jina Reader API, Readability-lxml, and BeautifulSoup4
