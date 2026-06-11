@@ -13,17 +13,8 @@ RESEARCH → deep research report          (< 30s async job)
 from __future__ import annotations
 
 import re
-from enum import Enum
 
-from config.settings import settings
-
-
-class QueryComplexity(str, Enum):
-    SIMPLE = "SIMPLE"
-    MEDIUM = "MEDIUM"
-    COMPLEX = "COMPLEX"
-    RESEARCH = "RESEARCH"
-
+from models.schemas import QueryComplexity
 
 _RESEARCH_RE = re.compile(
     r"\b(research|survey|comprehensive|in-depth|full report|write a report|"
