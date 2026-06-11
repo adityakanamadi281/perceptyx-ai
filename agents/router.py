@@ -58,9 +58,12 @@ def _heuristic_recency(query: str) -> float:
 
 
 def _corpus_match_score(query: str) -> float:
+    import warnings
     try:
         vs = get_vectorstore()
-        results = vs.similarity_search_with_relevance_scores(query, k=1)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Relevance scores must be between 0 and 1")
+            results = vs.similarity_search_with_relevance_scores(query, k=1)
         if results:
             return round(results[0][1], 3)
     except Exception:
@@ -82,7 +85,7 @@ def _fast_route(query: str, recency: float, corpus: float) -> RouteMode | None:
     if recency >= 0.8 and corpus < 0.4:
         return RouteMode.WEB_ONLY
 
-    if corpus >= 0.65 and recency < 0.3:
+    if corpus >= 0.40 and recency < 0.3:
         return RouteMode.LOCAL_ONLY
 
     return None
@@ -113,9 +116,12 @@ async def route_sub_query(sub_query: str, trace: PipelineTrace) -> RouteDecision
         "Decide the retrieval mode."
     )
     try:
-        resp = await llm.ainvoke(
-            [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
-            config={"callbacks": [callback]},
+        resp = await asyncio.wait_for(
+            llm.ainvoke(
+                [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
+                config={"callbacks": [callback]},
+            ),
+            timeout=10.0,
         )
         raw = resp.content.strip().lstrip("```json").rstrip("```")
         data = json.loads(raw)
