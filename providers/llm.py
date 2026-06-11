@@ -167,8 +167,12 @@ async def llm_invoke(
     # ── 1. Gemini ──
     if not _is_rate_limited("gemini"):
         try:
+            import asyncio
             llm = get_gemini_llm()
-            resp = await llm.ainvoke(msgs, **({"config": cfg} if cfg else {}))
+            resp = await asyncio.wait_for(
+                llm.ainvoke(msgs, **({"config": cfg} if cfg else {})),
+                timeout=30.0,
+            )
             return resp.content.strip() if resp.content else ""
         except Exception as exc:
             is_quota = any(k in str(exc) for k in ("RESOURCE_EXHAUSTED", "429", "quota"))
@@ -211,7 +215,17 @@ async def llm_stream(
     if not _is_rate_limited("gemini"):
         try:
             llm = get_gemini_llm()
-            async for token in llm.astream(msgs):
+            import asyncio
+            async def _stream_with_timeout():
+                iterator = llm.astream(msgs).__aiter__()
+                while True:
+                    try:
+                        token = await asyncio.wait_for(iterator.__anext__(), timeout=15.0)
+                        yield token
+                    except StopAsyncIteration:
+                        break
+
+            async for token in _stream_with_timeout():
                 yield token
             return
         except Exception as exc:
