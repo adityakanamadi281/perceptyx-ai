@@ -30,7 +30,7 @@ from models.schemas import (
     RouteMode,
     SearchOutput,
 )
-from providers.llm import llm_invoke, get_gemini_llm
+from providers.llm import get_gemini_llm
 from tools.github_tool import extract_repo_slug, fetch_github_data
 from tools.news import fetch_news
 
@@ -47,9 +47,12 @@ async def _detect_gaps(query: str, context: str, trace: PipelineTrace) -> list[s
     llm = get_gemini_llm()
     prompt = f"QUERY: {query}\n\nRETRIEVED CONTENT:\n{context[:3000]}\n\nWhat gaps remain?"
     try:
-        resp = await llm.ainvoke(
-            [SystemMessage(content=_GAP_SYSTEM), HumanMessage(content=prompt)],
-            config={"callbacks": [callback]},
+        resp = await asyncio.wait_for(
+            llm.ainvoke(
+                [SystemMessage(content=_GAP_SYSTEM), HumanMessage(content=prompt)],
+                config={"callbacks": [callback]},
+            ),
+            timeout=10.0,
         )
         raw = resp.content.strip().lstrip("```json").rstrip("```")
         gaps = json.loads(raw)

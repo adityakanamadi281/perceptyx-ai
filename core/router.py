@@ -53,7 +53,11 @@ async def classify_query(query: str, trace: PipelineTrace) -> bool:
 
     logger.info("routing_classification_start", query=query)
     try:
-        response = await llm.ainvoke(messages, config={"callbacks": [callback]})
+        import asyncio
+        response = await asyncio.wait_for(
+            llm.ainvoke(messages, config={"callbacks": [callback]}),
+            timeout=10.0
+        )
         raw = response.content.strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
