@@ -8,7 +8,6 @@ NewsAPI is tried first; GNews is used if NewsAPI key is absent or fails.
 from __future__ import annotations
 
 import time
-from typing import Literal
 
 import httpx
 import structlog
@@ -98,6 +97,21 @@ async def fetch_news(query: str, sub_query: str | None = None) -> NewsOutput:
             log.info("gnews_ok", count=len(articles))
         except Exception as e2:
             log.error("both_news_failed", error=str(e2))
+            try:
+                from tools.serper import serper_search
+                log.info("news_fallback_web_start", query=q)
+                web_results = await serper_search(q, n)
+                for r in web_results:
+                    articles.append(NewsArticle(
+                        title=r.title,
+                        url=r.url,
+                        source_name="Web Search",
+                        description=r.snippet,
+                        provider="newsapi",
+                    ))
+                log.info("news_fallback_web_ok", count=len(articles))
+            except Exception as e3:
+                log.error("news_fallback_web_failed", error=str(e3))
 
     return NewsOutput(
         sub_query=q,
