@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from core.observability import TelemetryCallback, get_logger
 from models.schemas import PipelineTrace
 from providers.gemini import get_gemini_llm
+from providers.llm import coerce_content
 
 _SYSTEM = """\
 You are an advanced query router. Analyze the user's query and determine if it requires real-time web search or fact-checking.
@@ -58,7 +59,7 @@ async def classify_query(query: str, trace: PipelineTrace) -> bool:
             llm.ainvoke(messages, config={"callbacks": [callback]}),
             timeout=10.0
         )
-        raw = response.content.strip()
+        raw = coerce_content(response.content).strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("```")[1]

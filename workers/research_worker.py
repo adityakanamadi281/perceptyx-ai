@@ -179,7 +179,7 @@ async def deep_research(ctx: dict, job_id: str, query: str, session_id: str | No
             step = f"Writing section {i+1}/{len(section_results)}..."
             await set_job_status(job_id, "running", progress=progress, result={"step": step})
 
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 log.warning("section_failed", error=str(result))
                 continue
 
@@ -203,7 +203,7 @@ async def deep_research(ctx: dict, job_id: str, query: str, session_id: str | No
         )
 
         # Build a mock AnswerResponse for compatibility
-        from models.schemas import AnswerResponse
+        from models.schemas import AnswerResponse, QueryComplexity
         answer = AnswerResponse(
             run_id=run_id,
             query=query,
@@ -212,7 +212,7 @@ async def deep_research(ctx: dict, job_id: str, query: str, session_id: str | No
             follow_up_questions=[],
             total_tokens=trace.total_tokens,
             latency_ms=0.0,
-            complexity="RESEARCH",
+            complexity=QueryComplexity.RESEARCH,
         )
 
         await set_job_status(job_id, "done", progress=100, result=answer.model_dump())

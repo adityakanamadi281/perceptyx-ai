@@ -97,7 +97,7 @@ async def multi_provider_search(query: str, n: int | None = None) -> list[Search
     merged: list[SearchResult] = []
 
     for label, results in zip(labels, raw_results):
-        if isinstance(results, Exception):
+        if isinstance(results, BaseException):
             log.warning("search_provider_failed", provider=label, error=str(results)[:120])
             continue
         for r in results:

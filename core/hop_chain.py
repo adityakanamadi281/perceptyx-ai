@@ -3,7 +3,7 @@ core/hop_chain.py  (v3)
 -----------------------
 Multi-hop retrieval: routes each sub-query to the correct source(s):
   web_only  → Serper → DDG fallback
-  local_only → ChromaDB RAG
+  local_only → Qdrant RAG
   hybrid    → local first, gap-detect, then web
   news      → NewsAPI → GNews fallback
   github    → GitHub REST API
@@ -30,7 +30,7 @@ from models.schemas import (
     RouteMode,
     SearchOutput,
 )
-from providers.llm import get_gemini_llm
+from providers.llm import coerce_content, get_gemini_llm
 from tools.github_tool import extract_repo_slug, fetch_github_data
 from tools.news import fetch_news
 
@@ -54,7 +54,7 @@ async def _detect_gaps(query: str, context: str, trace: PipelineTrace) -> list[s
             ),
             timeout=10.0,
         )
-        raw = resp.content.strip().lstrip("```json").rstrip("```")
+        raw = coerce_content(resp.content).strip().lstrip("```json").rstrip("```")
         gaps = json.loads(raw)
         return [g for g in gaps if isinstance(g, str) and g.strip()][:3]
     except Exception:
@@ -177,10 +177,11 @@ async def run_hop_chain(
 
         # Hop 2+: web for gaps
         for hop_n, gap_q in enumerate(gaps[:settings.max_hops - 1], start=2):
-            search_out = await run_search_agent(gap_q, trace)
+            gap_q_str = str(gap_q)
+            search_out = await run_search_agent(gap_q_str, trace)
             ctx_parts.append(_search_to_context(search_out))
             hops.append(HopResult(
-                hop_number=hop_n, source="web", sub_query=gap_q,
+                hop_number=hop_n, source="web", sub_query=gap_q_str,
                 content_snippets=[r.scraped_text or r.snippet for r in search_out.results],
                 latency_ms=search_out.latency_ms,
             ))

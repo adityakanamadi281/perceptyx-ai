@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator
 from functools import lru_cache
+from typing import Any
 
 import httpx
 import structlog
@@ -36,6 +37,24 @@ def _mark_rate_limited(provider: str, ttl_seconds: int = 60) -> None:
 
 # ── Gemini ────────────────────────────────────────────────────────────────────
 
+def coerce_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and "text" in item:
+                parts.append(item["text"])
+            elif hasattr(item, "text"):
+                parts.append(item.text)
+        return "".join(parts)
+    if content is None:
+        return ""
+    return str(content)
+
+
 class SafeChatGoogleGenerativeAI:
     """Thin wrapper around LangChain's ChatGoogleGenerativeAI with content sanitisation."""
 
@@ -51,16 +70,30 @@ class SafeChatGoogleGenerativeAI:
         )
 
     def _clean(self, msg: BaseMessage) -> BaseMessage:
-        if hasattr(msg, "content") and isinstance(msg.content, list):
-            parts = []
-            for item in msg.content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict) and "text" in item:
-                    parts.append(item["text"])
-                elif hasattr(item, "text"):
-                    parts.append(item.text)
-            msg.content = "".join(parts)
+        if hasattr(msg, "content"):
+            clean_str = coerce_content(msg.content)
+            try:
+                msg.content = clean_str
+            except Exception:
+                pass
+            if isinstance(msg.content, list):
+                if hasattr(msg, "model_copy"):
+                    msg = msg.model_copy(update={"content": clean_str})
+                else:
+                    try:
+                        cls = msg.__class__
+                        kwargs = {}
+                        if hasattr(cls, "model_fields"):
+                            for field_name in cls.model_fields:
+                                if field_name != "content" and hasattr(msg, field_name):
+                                    kwargs[field_name] = getattr(msg, field_name)
+                        else:
+                            kwargs = {k: v for k, v in msg.__dict__.items() if k != "content"}
+                        msg = cls(content=clean_str, **kwargs)
+                    except Exception:
+                        import copy
+                        msg = copy.copy(msg)
+                        msg.content = clean_str
         return msg
 
     async def ainvoke(self, msgs, **kwargs) -> BaseMessage:
@@ -173,7 +206,8 @@ async def llm_invoke(
                 llm.ainvoke(msgs, **({"config": cfg} if cfg else {})),
                 timeout=30.0,
             )
-            return resp.content.strip() if resp.content else ""
+            content_str = coerce_content(resp.content)
+            return content_str.strip() if content_str else ""
         except Exception as exc:
             is_quota = any(k in str(exc) for k in ("RESOURCE_EXHAUSTED", "429", "quota"))
             if is_quota:
