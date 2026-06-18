@@ -35,7 +35,8 @@ async def analyse_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> Im
     from google.genai import types
 
     t0 = time.perf_counter()
-    client = genai.Client(api_key=settings.gemini_api_key.get_secret_value())
+    api_key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else None
+    client = genai.Client(api_key=api_key)
 
     prompt = (
         "Analyse this image thoroughly. Return a JSON object with these exact keys:\n"
@@ -56,6 +57,8 @@ async def analyse_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> Im
             model=settings.gemini_vision_model,
             contents=[prompt, image_part],
         )
+        if not response.text:
+            raise ValueError("Empty response received from Gemini Vision API")
         raw = response.text.strip().lstrip("```json").rstrip("```")
         data = json.loads(raw)
         analysis = ImageAnalysis(

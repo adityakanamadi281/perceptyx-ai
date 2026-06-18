@@ -28,6 +28,8 @@ async def serper_search(query: str, num: int | None = None) -> list[SearchResult
         httpx.HTTPStatusError: on non-2xx responses.
     """
     n = num or settings.max_search_results
+    if not settings.serper_api_key:
+        raise ValueError("Serper API key is not configured")
     headers = {
         "X-API-KEY": settings.serper_api_key.get_secret_value(),
         "Content-Type": "application/json",

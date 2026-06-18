@@ -60,6 +60,8 @@ async def _do_search(query: str, mode: str) -> dict:
     results = []
 
     try:
+        if not settings.serper_api_key:
+            raise ValueError("Serper API key not configured")
         import httpx
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(

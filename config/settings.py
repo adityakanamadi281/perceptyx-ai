@@ -13,9 +13,9 @@ class Settings(BaseSettings):
         str_strip_whitespace=True,
     )
 
-    # ── Required ──────────────────────────────────────────────────────────────
-    gemini_api_key: SecretStr = Field(..., description="Google Gemini API key")
-    serper_api_key: SecretStr = Field(..., description="Serper.dev API key")
+    # ── Optional / Required API Keys ──────────────────────────────────────────
+    gemini_api_key: SecretStr | None = Field(None, description="Google Gemini API key")
+    serper_api_key: SecretStr | None = Field(None, description="Serper.dev API key")
 
     # ── Cloudflare AI Fallback ────────────────────────────────────────────────
     cloudflare_account_id: str | None = Field(None)

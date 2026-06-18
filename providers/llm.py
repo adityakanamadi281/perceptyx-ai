@@ -60,9 +60,10 @@ class SafeChatGoogleGenerativeAI:
 
     def __init__(self):
         from langchain_google_genai import ChatGoogleGenerativeAI
+        api_key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else None
         self._llm = ChatGoogleGenerativeAI(
             model=settings.gemini_model,
-            google_api_key=settings.gemini_api_key.get_secret_value(),
+            google_api_key=api_key,
             temperature=settings.gemini_temperature,
             max_output_tokens=settings.gemini_max_tokens,
             convert_system_message_to_human=True,
@@ -198,7 +199,7 @@ async def llm_invoke(
     cfg = {"callbacks": [callback]} if callback else {}
 
     # ── 1. Gemini ──
-    if not _is_rate_limited("gemini"):
+    if settings.gemini_api_key and not _is_rate_limited("gemini"):
         try:
             import asyncio
             llm = get_gemini_llm()
@@ -246,7 +247,7 @@ async def llm_stream(
     msgs = [SystemMessage(content=system), HumanMessage(content=user)]
 
     # ── 1. Gemini streaming ──
-    if not _is_rate_limited("gemini"):
+    if settings.gemini_api_key and not _is_rate_limited("gemini"):
         try:
             llm = get_gemini_llm()
             import asyncio
