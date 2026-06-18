@@ -26,7 +26,8 @@ A production-grade, Perplexity-class AI search engine built for high-performance
 - **Distributed Cache & Queue**: Redis (L2 semantic cache, distributed locks, and ARQ background job queue)
 - **Primary Database**: PostgreSQL (via SQLAlchemy & asyncpg)
 - **Vector Search Database**: Qdrant (with local sentence-transformers embeddings)
-- **AI Models & LLM Providers**: Gemini 3.5 flash ,  and Kimi k-2.6 (fallback)
+- **RLHF & Self-Learning**: Dual-engine strategy optimization (RewardModel & StrategyAdvisor using feedback_memory and procedural_memory in Qdrant)
+- **AI Models & LLM Providers**: Gemini 3.5 flash, and Kimi k-2.6 (fallback)
 - **Inference & Reranking**: Sentence-Transformers (`all-MiniLM-L6-v2` for cache/RAG embeddings, `ms-marco-MiniLM-L-6-v2` for cross-encoder reranking)
 - **Background Workers**: ARQ (Redis-based background scheduler)
 - **Scraping Tools**: HTTPX, Jina Reader API, Readability-lxml, and BeautifulSoup4
@@ -39,12 +40,11 @@ A production-grade, Perplexity-class AI search engine built for high-performance
 
 ```text
 ├── agents/      # Core agent logic (answering, RAG, reasoning, router, search)
-├── api/         # FastAPI application routes (SSE channels, query entrypoints)
 ├── config/      # Environment variables and Pydantic configuration settings
-├── core/        # Orchestration engine (complexity routing, caching, planning)
+├── core/        # Orchestration engine (complexity routing, caching, planning, RLHF)
 ├── db/          # DB schemas, models, and connection engine (PostgreSQL)
 ├── evaluation/  # Auto-evaluators to score generated answers
-├── memory/      # Persistent chat/session memory store
+├── memory/      # Persistent chat/session memory store (working, episodic, semantic, procedural)
 ├── migrations/  # Alembic database migration scripts
 ├── models/      # Pydantic request/response schemas
 ├── monitoring/  # Configuration files for Prometheus and Grafana dashboards
@@ -53,7 +53,9 @@ A production-grade, Perplexity-class AI search engine built for high-performance
 ├── scripts/     # CLI utilities and startup scripts
 ├── static/      # Static files and assets (single-page web dashboard)
 ├── tools/       # Agent tools (DDG, GitHub, News, Serper, Whispers)
-└── workers/     # Async ARQ task queue workers (crawl, embed, research, search)
+├── workers/     # Async ARQ task queue workers (crawl, embed, research, search)
+├── main.py      # Root-level FastAPI application entrypoint and lifespan manager
+└── pyproject.toml # Project dependencies and package configurations
 ```
 
 ---
