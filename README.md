@@ -25,7 +25,7 @@ A production-grade, Perplexity-class AI search engine built for high-performance
 - **Agent Orchestration**: LangChain Core
 - **Distributed Cache & Queue**: Redis (L2 semantic cache, distributed locks, and ARQ background job queue)
 - **Primary Database**: PostgreSQL (via SQLAlchemy & asyncpg)
-- **Vector Search Database**: ChromaDB (with local sentence-transformers embeddings)
+- **Vector Search Database**: Qdrant (with local sentence-transformers embeddings)
 - **AI Models & LLM Providers**: Gemini 3.5 flash ,  and Kimi k-2.6 (fallback)
 - **Inference & Reranking**: Sentence-Transformers (`all-MiniLM-L6-v2` for cache/RAG embeddings, `ms-marco-MiniLM-L-6-v2` for cross-encoder reranking)
 - **Background Workers**: ARQ (Redis-based background scheduler)
@@ -109,13 +109,13 @@ uv run alembic upgrade head
 
 #### Step C: Start the FastAPI Server
 ```bash
-uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 #### Step D: Run Async Workers
 In a separate terminal, start the background queue:
 ```bash
-uv run python -m arq workers.settings.WorkerSettings
+uv run arq workers.settings.WorkerSettings
 ```
 
 ---
@@ -126,7 +126,7 @@ To populate your local RAG search index from a folder of documents (PDFs, Markdo
 ```bash
 uv run python scripts/ingest_directory.py --dir ./path/to/your/documents
 ```
-*By default, the script reads from `./data/raw_docs` and writes directly to ChromaDB.*
+*By default, the script reads from `./data/raw_docs` and writes directly to Qdrant.*
 
 ---
 

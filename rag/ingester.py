@@ -1,7 +1,7 @@
 """
 rag/ingester.py
 ---------------
-Ingest local documents (PDF, Markdown, plain text) into ChromaDB
+Ingest local documents (PDF, Markdown, plain text) into Qdrant
 via LangChain's document loaders and text splitter.
 """
 
@@ -18,7 +18,7 @@ from langchain_community.document_loaders import (
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from rag.vectorstore import get_vectorstore
+from rag.vectorstore import upsert_document
 
 log = structlog.get_logger()
 
@@ -37,8 +37,12 @@ _LOADER_MAP = {
 
 def _chunk_id(doc: Document) -> str:
     """Stable ID from source + page + content hash."""
-    raw = f"{doc.metadata.get('source', '')}:{doc.metadata.get('page', 0)}:{doc.page_content[:120]}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+    source = str(doc.metadata.get("source", ""))
+    page = str(doc.metadata.get("page", 0))
+    content = doc.page_content
+    raw = f"{source}{page}{content}"
+    h = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
 
 
 async def ingest_file(path: str | Path) -> int:
@@ -66,8 +70,16 @@ async def ingest_file(path: str | Path) -> int:
         chunk.metadata["chunk_id"] = _chunk_id(chunk)
         chunk.metadata["source_file"] = p.name
 
-    vs = get_vectorstore()
-    vs.add_documents(chunks, ids=[c.metadata["chunk_id"] for c in chunks])
+    import asyncio
+    await asyncio.gather(*[
+        upsert_document(
+            collection_name="main_knowledge",
+            text=chunk.page_content,
+            metadata=chunk.metadata,
+            id=chunk.metadata["chunk_id"],
+        )
+        for chunk in chunks
+    ])
     log.info("ingested", file=p.name, chunks=len(chunks))
     return len(chunks)
 

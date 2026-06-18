@@ -15,6 +15,7 @@ dependencies = [
     "langchain>=0.2.0",
     "langchain-google-genai>=1.0.5",
     "langchain-community>=0.2.0",
+    "langchain-text-splitters>=0.2.0",
     "langgraph>=0.1.0",
     # Scraping
     "playwright>=1.44.0",
@@ -37,6 +38,7 @@ dependencies = [
     "structlog>=24.2.0",
     "opentelemetry-api>=1.24.0",
     "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.24.0",
     "prometheus-client>=0.20.0",
     "langsmith>=0.1.75",
     # Multimodal
@@ -45,8 +47,7 @@ dependencies = [
     # News
     "newsapi-python>=0.2.7",
     # RAG / vector store
-    "chromadb>=0.5.0",
-    "langchain-chroma>=0.1.2",
+    "qdrant-client>=1.9.0",
     "langchain-huggingface>=0.0.3",
     "sentence-transformers>=3.0.0",
     "pypdf>=4.2.0",
@@ -99,6 +100,6 @@ testpaths = ["tests"]
 [tool.hatch.build.targets.wheel]
 packages = [
     "config", "core", "agents", "providers",
-    "tools", "models", "api", "rag", "memory",
+    "tools", "models", "rag", "memory",
     "evaluation", "db", "workers",
 ]

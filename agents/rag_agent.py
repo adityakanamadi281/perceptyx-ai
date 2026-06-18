@@ -2,7 +2,7 @@
 agents/rag_agent.py
 -------------------
 Local RAG retrieval agent using LangChain's RetrievalQA chain.
-Retrieves relevant chunks from ChromaDB and returns structured RAGOutput.
+Retrieves relevant chunks from Qdrant and returns structured RAGOutput.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from config.settings import settings
 from core.observability import TelemetryCallback, get_logger
 from models.schemas import PipelineTrace, RAGChunk, RAGOutput
 from providers.gemini import get_gemini_llm
-from rag.vectorstore import get_vectorstore
+from rag.vectorstore import similarity_search
 
 
 async def run_rag_agent(
@@ -34,23 +34,12 @@ async def run_rag_agent(
     t0 = time.perf_counter()
     callback = TelemetryCallback("rag_agent", trace)
 
-    vs = get_vectorstore()
-    retriever = vs.as_retriever(
-        search_type="mmr",
-        search_kwargs={
-            "k": settings.rag_top_k,
-            "fetch_k": settings.rag_top_k * 3,
-            "lambda_mult": 0.6,
-            "score_threshold": settings.rag_score_threshold,
-        },
-    )
-
     logger.info("rag_retrieve_start", sub_query=sub_query)
 
     # Get docs with scores for ranking
     try:
-        docs_scores: list[tuple[Document, float]] = vs.similarity_search_with_relevance_scores(
-            sub_query, k=settings.rag_top_k
+        docs_scores: list[tuple[Document, float]] = await similarity_search(
+            "main_knowledge", sub_query, k=settings.rag_top_k
         )
     except Exception as exc:
         logger.warning("rag_similarity_failed", error=str(exc))

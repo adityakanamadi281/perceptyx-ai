@@ -1,7 +1,7 @@
 """
 workers/embedding_worker.py
 ───────────────────────────
-ARQ worker: chunk documents, generate embeddings, update ChromaDB.
+ARQ worker: chunk documents, generate embeddings, update Qdrant.
 """
 from __future__ import annotations
 

@@ -3,7 +3,7 @@
 scripts/ingest_directory.py
 --------------------------
 Ingests all supported documents (PDF, Markdown, plain text) from a local folder 
-into the ChromaDB vector store.
+into the Qdrant vector store.
 """
 
 from __future__ import annotations
@@ -18,11 +18,12 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from rag.ingester import ingest_directory
 from config.settings import settings
+from rag.vectorstore import ensure_collections
 
 
 async def main():
     parser = argparse.ArgumentParser(
-        description="Ingest local documents (PDF, MD, TXT) into ChromaDB."
+        description="Ingest local documents (PDF, MD, TXT) into Qdrant."
     )
     parser.add_argument(
         "--dir",
@@ -39,12 +40,13 @@ async def main():
         sys.exit(1)
 
     print(f"Starting ingestion from directory: {data_dir.resolve()}")
-    print(f"Target ChromaDB path: {Path(settings.chroma_persist_dir).resolve()}")
-    print(f"ChromaDB Collection: {settings.chroma_collection}")
+    print(f"Target Qdrant URL: {settings.qdrant_url}")
+    print(f"Qdrant Collection: main_knowledge")
     print(f"Embedding Model: {settings.embedding_model}")
     print("Ingesting... (this may take a moment to download/load the embedding model)")
 
     try:
+        await ensure_collections()
         results = await ingest_directory(data_dir)
         if not results:
             print("No supported files (.pdf, .md, .txt) were found or ingested.")

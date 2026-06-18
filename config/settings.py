@@ -84,9 +84,16 @@ class Settings(BaseSettings):
     github_max_commits: int = Field(10)
     github_max_prs: int = Field(10)
 
+    # ── Qdrant ────────────────────────────────────────────────────────────────
+    qdrant_url: str = Field("http://localhost:6333")
+    qdrant_api_key: SecretStr | None = Field(None, description="Qdrant API key")
+
+    # ── Self-Learning & Parametric Knowledge ──────────────────────────────────
+    enable_llm_knowledge: bool = Field(True)
+    enable_self_learning: bool = Field(True)
+    latency_budget_ms: int = Field(600)
+
     # ── RAG ───────────────────────────────────────────────────────────────────
-    chroma_persist_dir: str = Field("./data/chroma")
-    chroma_collection: str = Field("perplexity_kb")
     embedding_model: str = Field("sentence-transformers/all-MiniLM-L6-v2")
     rag_top_k: int = Field(5, ge=1, le=20)
     rag_retrieve_top_k: int = Field(50, ge=10, le=100)
@@ -139,6 +146,7 @@ class Settings(BaseSettings):
     enable_otel: bool = Field(False)
     otel_endpoint: str = Field("http://localhost:4317")
     enable_prometheus: bool = Field(True)
+    prometheus_port: int = Field(9100, ge=1024, le=65535)
 
     # ── FastAPI ───────────────────────────────────────────────────────────────
     app_host: str = Field("0.0.0.0")

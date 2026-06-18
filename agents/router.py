@@ -24,7 +24,8 @@ from config.settings import settings
 from core.observability import TelemetryCallback, get_logger
 from models.schemas import PipelineTrace, RouteDecision, RouteMode
 from providers.gemini import get_gemini_llm
-from rag.vectorstore import get_vectorstore
+from providers.llm import coerce_content
+from rag.vectorstore import similarity_search
 
 log = structlog.get_logger()
 
@@ -57,13 +58,9 @@ def _heuristic_recency(query: str) -> float:
     return min(hits / 2.0, 1.0)
 
 
-def _corpus_match_score(query: str) -> float:
-    import warnings
+async def _corpus_match_score(query: str) -> float:
     try:
-        vs = get_vectorstore()
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="Relevance scores must be between 0 and 1")
-            results = vs.similarity_search_with_relevance_scores(query, k=1)
+        results = await similarity_search("main_knowledge", query, k=1)
         if results:
             return round(results[0][1], 3)
     except Exception:
@@ -96,7 +93,7 @@ async def route_sub_query(sub_query: str, trace: PipelineTrace) -> RouteDecision
     t0 = time.perf_counter()
 
     recency = _heuristic_recency(sub_query)
-    corpus = _corpus_match_score(sub_query)
+    corpus = await _corpus_match_score(sub_query)
 
     fast = _fast_route(sub_query, recency, corpus)
     if fast is not None:
@@ -123,7 +120,7 @@ async def route_sub_query(sub_query: str, trace: PipelineTrace) -> RouteDecision
             ),
             timeout=10.0,
         )
-        raw = resp.content.strip().lstrip("```json").rstrip("```")
+        raw = coerce_content(resp.content).strip().lstrip("```json").rstrip("```")
         data = json.loads(raw)
         mode = RouteMode(data["mode"])
         reasoning = data.get("reasoning", "")

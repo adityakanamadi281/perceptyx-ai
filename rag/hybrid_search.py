@@ -47,15 +47,14 @@ def _rrf_fusion(
     return [RankedDoc(content=docs[k][0], score=v, metadata=docs[k][1]) for k, v in ranked]
 
 
-def _vector_search(query: str, top_k: int) -> list[tuple[str, float, dict]]:
+async def _vector_search(query: str, top_k: int) -> list[tuple[str, float, dict]]:
     try:
-        from rag.vectorstore import get_vectorstore
-        vs = get_vectorstore()
-        results = vs.similarity_search_with_relevance_scores(query, k=top_k)
+        from rag.vectorstore import similarity_search
+        results = await similarity_search("main_knowledge", query, k=top_k)
         return [
-            (doc.page_content, float(score), doc.metadata)
+            (doc.page_content, score, doc.metadata)
             for doc, score in results
-            if float(score) >= settings.rag_score_threshold
+            if score >= settings.rag_score_threshold
         ]
     except Exception as exc:
         log.warning("vector_search_error", error=str(exc))
@@ -92,11 +91,11 @@ async def hybrid_retrieve(query: str) -> list[RankedDoc]:
 
     if not settings.enable_hybrid_search:
         # Simple vector-only path
-        vector_res = _vector_search(query, retrieve_k)
+        vector_res = await _vector_search(query, retrieve_k)
         docs = [RankedDoc(content=c, score=s, metadata=m) for c, s, m in vector_res]
         return rerank(query, docs)
 
-    vector_res = _vector_search(query, retrieve_k)
+    vector_res = await _vector_search(query, retrieve_k)
     candidate_texts = [c for c, _, _ in vector_res]
     bm25_res = _bm25_search(query, candidate_texts, retrieve_k)
 
