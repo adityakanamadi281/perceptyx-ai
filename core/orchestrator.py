@@ -99,8 +99,8 @@ async def _run_parallel_retrieval(
 
 async def _node_load_memory(state: dict) -> dict:
     ps = PipelineState(**state)
-    if ps.session_id:
-        ps.memory_context = await get_context_string(ps.session_id)
+    if not ps.memory_context and ps.session_id:
+        ps.memory_context = await get_context_string(ps.session_id, ps.query)
     return ps.model_dump()
 
 
@@ -116,6 +116,7 @@ async def _node_plan(state: dict) -> dict:
     ps = PipelineState(**state)
     if needs_planner(ps.complexity):
         from core.planner import plan_sub_queries
+        assert ps.trace is not None
         sub_queries = await plan_sub_queries(ps.query, ps.trace, memory_context=ps.memory_context)
     else:
         sub_queries = [ps.query]
@@ -127,6 +128,7 @@ async def _node_plan(state: dict) -> dict:
 async def _node_route(state: dict) -> dict:
     ps = PipelineState(**state)
     from agents.router import route_all
+    assert ps.trace is not None
     decisions = await route_all(ps.sub_queries, ps.trace)
     ps.route_decisions = decisions
     for d in decisions:
@@ -139,6 +141,7 @@ async def _node_route(state: dict) -> dict:
 async def _node_retrieve(state: dict) -> dict:
     ps = PipelineState(**state)
     _emit(ps, SSEEventType.PROGRESS, {"step": "Fetching Sources..."})
+    assert ps.trace is not None
     hop_outputs = await _run_parallel_retrieval(
         ps.sub_queries, ps.route_decisions, ps.trace, ps.sse_queue, ps.run_id
     )
@@ -187,6 +190,7 @@ async def _node_reason(state: dict) -> dict:
         ))
 
     # FIXED: run reason agents in PARALLEL (removed sequential sleep(0.3))
+    assert ps.trace is not None
     reason_outs = list(
         await asyncio.gather(*[run_reason_agent(so, ps.trace) for so in search_proxies])
     )
@@ -233,6 +237,7 @@ async def _node_answer(state: dict) -> dict:
         for ho in ps.hop_outputs
     ]
 
+    assert ps.trace is not None
     answer = await run_answer_agent(
         query=ps.query,
         reason_outputs=ps.reason_outputs,
@@ -259,6 +264,7 @@ async def _node_evaluate(state: dict) -> dict:
 
     if ps.answer and needs_evaluation(ps.complexity):
         from evaluation.evaluator import evaluate_answer
+        assert ps.trace is not None
         eval_result = await evaluate_answer(ps.answer, merged_context, ps.trace)
         ps.eval_result = eval_result
         _emit(ps, SSEEventType.EVAL_DONE, eval_result.model_dump())
@@ -271,28 +277,37 @@ async def _node_evaluate(state: dict) -> dict:
 async def _node_save_memory(state: dict) -> dict:
     ps = PipelineState(**state)
     if ps.session_id and ps.answer:
-        await save_turn(ps.session_id, "user", ps.query)
-        await save_turn(ps.session_id, "assistant", ps.answer.answer[:800])
+        async def _save():
+            await save_turn(ps.session_id, "user", ps.query)
+            await save_turn(ps.session_id, "assistant", ps.answer.answer[:800])
+            try:
+                from memory.store import save_episodic_memory
+                await save_episodic_memory(ps.query, ps.answer.answer)
+            except Exception as e:
+                log.warning("bg_save_episodic_failed", error=str(e))
+        asyncio.create_task(_save())
     return ps.model_dump()
 
 
 async def _node_persist_metrics(state: dict) -> dict:
     ps = PipelineState(**state)
-    try:
-        from db.engine import get_session
-        from db.models import QueryMetric
-        latency_ms = ps.trace.total_latency_ms if ps.trace else 0.0
-        async with get_session() as db:
-            metric = QueryMetric(
-                run_id=ps.run_id,
-                complexity=ps.complexity,
-                latency_ms=latency_ms,
-                tokens=ps.trace.total_tokens if ps.trace else 0,
-                cache_hit=ps.cache_hit,
-            )
-            db.add(metric)
-    except Exception as exc:
-        log.debug("metrics_persist_error", error=str(exc))
+    async def _persist():
+        try:
+            from db.engine import get_session
+            from db.models import QueryMetric
+            latency_ms = ps.trace.total_latency_ms if ps.trace else 0.0
+            async with get_session() as db:
+                metric = QueryMetric(
+                    run_id=ps.run_id,
+                    complexity=ps.complexity,
+                    latency_ms=latency_ms,
+                    tokens=ps.trace.total_tokens if ps.trace else 0,
+                    cache_hit=ps.cache_hit,
+                )
+                db.add(metric)
+        except Exception as exc:
+            log.debug("metrics_persist_error", error=str(exc))
+    asyncio.create_task(_persist())
     return ps.model_dump()
 
 
@@ -335,13 +350,38 @@ async def run_pipeline(request: QueryRequest) -> AnswerResponse:
         return AnswerResponse(**cached)
     record_cache_miss("answer")
 
+    # Concurrently load memory and run Strategy Advisor
+    from core.rlhf import get_strategy_advisor_recommendation
+    memory_context, advisor_recommendation = await asyncio.gather(
+        get_context_string(request.session_id or "", request.query),
+        get_strategy_advisor_recommendation(request.query),
+        return_exceptions=True
+    )
+    if isinstance(memory_context, BaseException):
+        memory_context = ""
+    if isinstance(advisor_recommendation, BaseException):
+        advisor_recommendation = None
+
     complexity = classify_query(request.query)
     if request.force_research:
         complexity = QueryComplexity.RESEARCH
 
+    # Upgrade complexity based on strategy advisor recommendation (never downgrade)
+    if advisor_recommendation in ("SIMPLE", "MEDIUM", "COMPLEX", "RESEARCH"):
+        rec_complexity = QueryComplexity(advisor_recommendation)
+        order = {
+            QueryComplexity.SIMPLE: 1,
+            QueryComplexity.MEDIUM: 2,
+            QueryComplexity.COMPLEX: 3,
+            QueryComplexity.RESEARCH: 4
+        }
+        if order.get(rec_complexity, 0) > order.get(complexity, 0):
+            logger.info("complexity_upgraded_by_rlhf_advisor", old=complexity, new=rec_complexity)
+            complexity = rec_complexity
+
     if complexity == QueryComplexity.SIMPLE:
         from agents.router import _corpus_match_score
-        corpus_score = _corpus_match_score(request.query)
+        corpus_score = await _corpus_match_score(request.query)
         if corpus_score >= settings.rag_score_threshold:
             complexity = QueryComplexity.MEDIUM
             logger.info(
@@ -366,6 +406,7 @@ async def run_pipeline(request: QueryRequest) -> AnswerResponse:
         query=request.query,
         complexity=complexity,
         trace=trace,
+        memory_context=memory_context,
     ).model_dump()
 
     final = await asyncio.wait_for(
@@ -380,6 +421,7 @@ async def run_pipeline(request: QueryRequest) -> AnswerResponse:
         await set_cached_answer(request.query, ps.answer.model_dump())
 
     logger.info("pipeline_done", latency_ms=round(trace.total_latency_ms, 1), tokens=trace.total_tokens)
+    assert ps.answer is not None
     return ps.answer
 
 
@@ -401,13 +443,38 @@ async def stream_pipeline(request: QueryRequest) -> AsyncIterator[SSEEvent]:
         return
     record_cache_miss("answer")
 
+    # Concurrently load memory and run Strategy Advisor
+    from core.rlhf import get_strategy_advisor_recommendation
+    memory_context, advisor_recommendation = await asyncio.gather(
+        get_context_string(request.session_id or "", request.query),
+        get_strategy_advisor_recommendation(request.query),
+        return_exceptions=True
+    )
+    if isinstance(memory_context, BaseException):
+        memory_context = ""
+    if isinstance(advisor_recommendation, BaseException):
+        advisor_recommendation = None
+
     complexity = classify_query(request.query)
     if request.force_research:
         complexity = QueryComplexity.RESEARCH
 
+    # Upgrade complexity based on strategy advisor recommendation (never downgrade)
+    if advisor_recommendation in ("SIMPLE", "MEDIUM", "COMPLEX", "RESEARCH"):
+        rec_complexity = QueryComplexity(advisor_recommendation)
+        order = {
+            QueryComplexity.SIMPLE: 1,
+            QueryComplexity.MEDIUM: 2,
+            QueryComplexity.COMPLEX: 3,
+            QueryComplexity.RESEARCH: 4
+        }
+        if order.get(rec_complexity, 0) > order.get(complexity, 0):
+            logger.info("complexity_upgraded_by_rlhf_advisor", old=complexity, new=rec_complexity)
+            complexity = rec_complexity
+
     if complexity == QueryComplexity.SIMPLE:
         from agents.router import _corpus_match_score
-        corpus_score = _corpus_match_score(request.query)
+        corpus_score = await _corpus_match_score(request.query)
         if corpus_score >= settings.rag_score_threshold:
             complexity = QueryComplexity.MEDIUM
             logger.info(
@@ -423,6 +490,7 @@ async def stream_pipeline(request: QueryRequest) -> AsyncIterator[SSEEvent]:
         query=request.query,
         complexity=complexity,
         trace=trace,
+        memory_context=memory_context,
     ).model_dump()
 
     seen = 0
@@ -530,6 +598,7 @@ async def stream_pipeline(request: QueryRequest) -> AsyncIterator[SSEEvent]:
                 stream_answer_agent,
             )
             tokens_collected = []
+            assert ps.trace is not None
             async for token in stream_answer_agent(
                 query=request.query,
                 reason_outputs=ps.reason_outputs,
